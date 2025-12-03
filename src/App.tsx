@@ -8,6 +8,7 @@ import { BanksAccounts } from "@/pages/BanksAccounts";
 import { MoneyFlow } from "@/pages/MoneyFlow";
 import { Expenses } from "@/pages/Expenses";
 import { Budgets } from "@/pages/Budgets";
+import { Goals } from "@/pages/Goals";
 import { Settings } from "@/pages/Settings";
 
 const queryClient = new QueryClient({
@@ -32,6 +33,7 @@ function App() {
               <Route path="/flow" element={<MoneyFlow />} />
               <Route path="/expenses" element={<Expenses />} />
               <Route path="/budgets" element={<Budgets />} />
+              <Route path="/goals" element={<Goals />} />
               <Route path="/settings" element={<Settings />} />
             </Route>
           </Routes>

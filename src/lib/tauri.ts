@@ -485,3 +485,124 @@ export const backupApi = {
   saveToFile: (path: string) => invoke<void>("save_backup_to_file", { path }),
   importFromFile: (path: string) => invoke<void>("import_from_backup_file", { path }),
 };
+
+// ============================================
+// FINANCIAL GOALS & FUNDS
+// ============================================
+export interface FinancialGoal {
+  id: number;
+  name: string;
+  goal_type: "weekly_variable" | "fund" | "yearly_goal";
+  icon?: string;
+  color?: string;
+  // Pro weekly_variable
+  weekly_amount?: number;
+  day_of_week?: number; // 0=Po, 1=Út, 2=St, 3=Čt, 4=Pá, 5=So, 6=Ne
+  // Pro fund
+  monthly_contribution?: number;
+  current_balance?: number;
+  // Pro yearly_goal
+  yearly_amount?: number;
+  target_month?: number; // 1-12
+  current_saved?: number; // Kolik už mám naspořeno
+  // Společné
+  account_id?: number;
+  notes?: string;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface MonthlyPlan {
+  id: number;
+  goal_id: number;
+  year: number;
+  month: number;
+  planned_count: number;
+  realized_count: number;
+  planned_amount: number;
+  realized_amount: number;
+  notes?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface FundWithdrawal {
+  id: number;
+  goal_id: number;
+  amount: number;
+  description?: string;
+  date: string;
+  created_at?: string;
+}
+
+export const goalsApi = {
+  getGoals: () => invoke<FinancialGoal[]>("get_financial_goals"),
+  createGoal: (input: {
+    name: string;
+    goal_type: string;
+    icon?: string;
+    color?: string;
+    weekly_amount?: number;
+    day_of_week?: number;
+    monthly_contribution?: number;
+    current_balance?: number;
+    yearly_amount?: number;
+    target_month?: number;
+    current_saved?: number;
+    account_id?: number;
+    notes?: string;
+  }) => invoke<FinancialGoal>("create_financial_goal", { input }),
+  updateGoal: (id: number, input: {
+    name: string;
+    goal_type: string;
+    icon?: string;
+    color?: string;
+    weekly_amount?: number;
+    day_of_week?: number;
+    monthly_contribution?: number;
+    current_balance?: number;
+    yearly_amount?: number;
+    target_month?: number;
+    current_saved?: number;
+    account_id?: number;
+    notes?: string;
+    is_active: boolean;
+  }) => invoke<FinancialGoal>("update_financial_goal", { id, input }),
+  deleteGoal: (id: number) => invoke<void>("delete_financial_goal", { id }),
+  // Fund operations
+  addContribution: (goalId: number, amount: number) => 
+    invoke<FinancialGoal>("add_fund_contribution", { goal_id: goalId, amount }),
+  createWithdrawal: (input: {
+    goal_id: number;
+    amount: number;
+    description?: string;
+    date?: string;
+  }) => invoke<FundWithdrawal>("create_fund_withdrawal", { input }),
+  getWithdrawals: (goalId: number) => 
+    invoke<FundWithdrawal[]>("get_fund_withdrawals", { goal_id: goalId }),
+  // Monthly plans
+  getMonthlyPlan: (goalId: number, year: number, month: number) =>
+    invoke<MonthlyPlan | null>("get_monthly_plan", { goalId, year, month }),
+  updateMonthlyPlan: (
+    goalId: number,
+    year: number,
+    month: number,
+    plannedCount: number,
+    realizedCount: number,
+    plannedAmount: number,
+    realizedAmount: number,
+    notes?: string
+  ) => invoke<MonthlyPlan>("create_or_update_monthly_plan", {
+    goalId, 
+    year, 
+    month,
+    plannedCount,
+    realizedCount,
+    plannedAmount,
+    realizedAmount,
+    notes
+  }),
+  getMonthlyPlansHistory: (goalId: number, limit?: number) =>
+    invoke<MonthlyPlan[]>("get_monthly_plans_history", { goalId, limit }),
+};

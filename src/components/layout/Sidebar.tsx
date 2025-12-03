@@ -9,6 +9,7 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  Target,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,7 @@ const navigation = [
   { name: "Workflow převodů", href: "/flow", icon: GitBranch },
   { name: "Stálé výdaje", href: "/expenses", icon: Receipt },
   { name: "Rozpočty", href: "/budgets", icon: PiggyBank },
+  { name: "Cíle & Fondy", href: "/goals", icon: Target },
 ];
 
 export function Sidebar() {

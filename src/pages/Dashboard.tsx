@@ -421,6 +421,83 @@ export function Dashboard() {
         </Card>
       </div>
 
+      {/* Accounts Overview */}
+      {accounts.length > 0 && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Building2 className="h-5 w-5" />
+              Přehled účtů
+            </CardTitle>
+            <Button variant="ghost" size="sm" onClick={() => navigate("/banks")}>
+              Upravit <ArrowRight className="ml-1 h-4 w-4" />
+            </Button>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+              {accounts.map((account) => {
+                const bank = getBankById(account.bank_id);
+                const isCreditCard = account.account_type === "credit_card";
+                const balance = account.current_balance || 0;
+                const creditLimit = account.credit_limit || 0;
+                
+                return (
+                  <div
+                    key={account.id}
+                    className="p-3 rounded-lg border"
+                    style={{ borderLeftWidth: 4, borderLeftColor: bank?.color || "#ccc" }}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2">
+                        <Badge 
+                          variant="outline" 
+                          className="text-xs"
+                          style={{ borderColor: bank?.color, color: bank?.color }}
+                        >
+                          {bank?.short_name || bank?.name?.slice(0, 3)}
+                        </Badge>
+                        <span className="font-medium text-sm">{account.name}</span>
+                      </div>
+                      {account.is_premium && (
+                        <Badge variant="secondary" className="text-xs">⭐</Badge>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      {isCreditCard ? (
+                        <>
+                          <p className={`text-lg font-bold ${balance >= 0 ? "text-green-600" : "text-red-600"}`}>
+                            {formatCurrency(balance)}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Limit: {formatCurrency(creditLimit)} | Dluh: {formatCurrency(Math.max(0, creditLimit - balance))}
+                          </p>
+                        </>
+                      ) : (
+                        <p className={`text-lg font-bold ${balance >= 0 ? "text-slate-900" : "text-red-600"}`}>
+                          {formatCurrency(balance)}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="mt-4 pt-3 border-t flex justify-between items-center">
+              <span className="text-sm text-muted-foreground">Celkem na účtech:</span>
+              <span className="text-xl font-bold">
+                {formatCurrency(accounts.reduce((sum, acc) => {
+                  // For credit cards, count available balance as positive only if > 0
+                  if (acc.account_type === "credit_card") {
+                    return sum; // Don't add credit card available balance to total
+                  }
+                  return sum + (acc.current_balance || 0);
+                }, 0))}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Quick Setup Cards */}
       {(!hasBanks || totalFixedExpenses === 0 || totalBudgets === 0) && (
         <div className="grid gap-4 md:grid-cols-3">

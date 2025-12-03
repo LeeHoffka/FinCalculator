@@ -114,6 +114,18 @@ pub fn run() {
             commands::get_budget_categories,
             commands::create_budget_category,
             commands::delete_budget_category,
+            // Financial Goals & Funds
+            commands::create_financial_goal,
+            commands::get_financial_goals,
+            commands::update_financial_goal,
+            commands::delete_financial_goal,
+            commands::create_fund_withdrawal,
+            commands::get_fund_withdrawals,
+            commands::add_fund_contribution,
+            // Monthly Plans
+            commands::get_monthly_plan,
+            commands::create_or_update_monthly_plan,
+            commands::get_monthly_plans_history,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

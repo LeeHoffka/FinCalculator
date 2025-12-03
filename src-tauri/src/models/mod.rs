@@ -9,6 +9,7 @@ pub mod flow;
 pub mod goal;
 pub mod household;
 pub mod backup;
+pub mod financial_goals;
 
 pub use user::*;
 pub use bank::*;
@@ -21,4 +22,5 @@ pub use flow::*;
 pub use goal::*;
 pub use household::*;
 pub use backup::*;
+pub use financial_goals::*;
 
