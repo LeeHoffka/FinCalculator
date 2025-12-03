@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, Trash2, ArrowRight, Calendar, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { Plus, Trash2, ArrowRight, Calendar, ChevronDown, ChevronUp, Loader2, AlertTriangle, TrendingUp, TrendingDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -19,18 +19,20 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { useTransfersTimeline, useCreateTransfer, useDeleteTransfer } from "@/hooks/useTransfers";
+import { useTransfersTimeline, useCreateTransfer, useDeleteTransfer, useCashFlowAnalysis } from "@/hooks/useTransfers";
 import { useBanksWithAccounts } from "@/hooks/useBanksAccounts";
 import { formatCurrency } from "@/utils/currency";
 
 export function MoneyFlow() {
-  const { timeline, totalAmount, isLoading } = useTransfersTimeline();
+  const { timeline, totalAmount, isLoading: timelineLoading } = useTransfersTimeline();
   const { accounts, banks } = useBanksWithAccounts();
+  const { premiumStatus, accountCashFlows, isLoading: cashFlowLoading } = useCashFlowAnalysis();
   const createTransfer = useCreateTransfer();
   const deleteTransfer = useDeleteTransfer();
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [expandedDays, setExpandedDays] = useState<Set<number>>(new Set());
+  const [showCashFlow, setShowCashFlow] = useState(false);
 
   const [form, setForm] = useState({
     name: "",
@@ -43,16 +45,21 @@ export function MoneyFlow() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await createTransfer.mutateAsync(form);
-    setForm({
-      name: "",
-      from_account_id: 0,
-      to_account_id: 0,
-      amount: 0,
-      day_of_month: 1,
-      description: "",
-    });
-    setIsDialogOpen(false);
+    try {
+      await createTransfer.mutateAsync(form);
+      setForm({
+        name: "",
+        from_account_id: 0,
+        to_account_id: 0,
+        amount: 0,
+        day_of_month: 1,
+        description: "",
+      });
+      setIsDialogOpen(false);
+    } catch (error) {
+      console.error("Failed to create transfer:", error);
+      alert("Chyba při vytváření převodu: " + (error as Error).message);
+    }
   };
 
   const toggleDay = (day: number) => {
@@ -80,15 +87,12 @@ export function MoneyFlow() {
     };
   };
 
-  // Calculate premium account status
-  const accountsWithInflow = accounts.filter((acc) => {
-    if (!acc.is_premium) return false;
-    const inflow = timeline
-      .flatMap((t) => t.transfers)
-      .filter((t) => t.to_account_id === acc.id)
-      .reduce((sum, t) => sum + t.amount, 0);
-    return inflow > 0 || acc.premium_min_flow;
-  });
+  // Find accounts with problems
+  const problemAccounts = Array.from(accountCashFlows.values()).filter(
+    (flow) => flow.hasNegativeBalance
+  );
+
+  const isLoading = timelineLoading || cashFlowLoading;
 
   if (isLoading) {
     return (
@@ -127,47 +131,204 @@ export function MoneyFlow() {
         </Card>
       ) : (
         <>
+          {/* Problem accounts warning */}
+          {problemAccounts.length > 0 && (
+            <Card className="border-red-300 bg-red-50">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base text-red-700 flex items-center gap-2">
+                  <AlertTriangle className="h-5 w-5" />
+                  Varování: Záporné zůstatky!
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {problemAccounts.map((flow) => {
+                    const account = getAccountById(flow.accountId);
+                    const bank = account ? getBankById(account.bank_id) : undefined;
+                    return (
+                      <div key={flow.accountId} className="flex items-center justify-between p-2 bg-white rounded border border-red-200">
+                        <div className="flex items-center gap-2">
+                          <div
+                            className="px-2 py-0.5 rounded text-xs font-bold text-white"
+                            style={{ backgroundColor: bank?.color || "#666" }}
+                          >
+                            {bank?.short_name || bank?.name?.slice(0, 2)}
+                          </div>
+                          <span className="font-medium">{account?.name}</span>
+                        </div>
+                        <span className="text-red-600 font-bold">
+                          Min. zůstatek: {formatCurrency(flow.minBalance)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="text-sm text-red-600 mt-3">
+                  Tyto účty budou během měsíce v mínusu. Upravte částky převodů nebo jejich načasování.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Premium accounts status */}
-          {accountsWithInflow.length > 0 && (
+          {premiumStatus.length > 0 && (
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">⭐ Prémiové účty - stav obratu</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                  {accountsWithInflow.map((acc) => {
-                    const bank = getBankById(acc.bank_id);
-                    const inflow = timeline
-                      .flatMap((t) => t.transfers)
-                      .filter((t) => t.to_account_id === acc.id)
-                      .reduce((sum, t) => sum + t.amount, 0);
-                    const isOk = !acc.premium_min_flow || inflow >= acc.premium_min_flow;
+                  {premiumStatus.map(({ account, inflow, minRequired, isOk, hasNegativeBalance }) => {
+                    const bank = getBankById(account.bank_id);
 
                     return (
                       <div
-                        key={acc.id}
+                        key={account.id}
                         className={`p-3 rounded-lg border ${
-                          isOk ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"
+                          hasNegativeBalance
+                            ? "bg-red-50 border-red-200"
+                            : isOk
+                            ? "bg-green-50 border-green-200"
+                            : "bg-amber-50 border-amber-200"
                         }`}
                       >
                         <div className="flex items-center justify-between">
                           <div>
-                            <p className="font-medium">{acc.name}</p>
+                            <p className="font-medium">{account.name}</p>
                             <p className="text-xs text-muted-foreground">{bank?.name}</p>
                           </div>
-                          <Badge variant={isOk ? "default" : "destructive"}>
-                            {isOk ? "✓ OK" : "✗ Nesplněno"}
-                          </Badge>
+                          <div className="flex flex-col items-end gap-1">
+                            <Badge variant={isOk ? "default" : "destructive"}>
+                              {isOk ? "✓ Splněno" : "✗ Nesplněno"}
+                            </Badge>
+                            {hasNegativeBalance && (
+                              <Badge variant="destructive" className="text-xs">
+                                ⚠️ Záporný zůstatek
+                              </Badge>
+                            )}
+                          </div>
                         </div>
                         <div className="mt-2 text-sm">
-                          <span className="font-medium">{formatCurrency(inflow)}</span>
-                          {acc.premium_min_flow && (
+                          <span className={`font-medium ${inflow >= minRequired ? "text-green-600" : "text-red-600"}`}>
+                            {formatCurrency(inflow)}
+                          </span>
+                          {minRequired > 0 && (
                             <span className="text-muted-foreground">
                               {" "}
-                              / {formatCurrency(acc.premium_min_flow)} min.
+                              / {formatCurrency(minRequired)} min.
                             </span>
                           )}
                         </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Cash Flow Analysis Toggle */}
+          <div className="flex items-center gap-2">
+            <Button
+              variant={showCashFlow ? "default" : "outline"}
+              onClick={() => setShowCashFlow(!showCashFlow)}
+            >
+              {showCashFlow ? "Skrýt" : "Zobrazit"} cash flow analýzu
+            </Button>
+          </div>
+
+          {/* Cash Flow Analysis */}
+          {showCashFlow && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  📊 Cash Flow Analýza
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {accounts.map((account) => {
+                    const flow = accountCashFlows.get(account.id);
+                    const bank = getBankById(account.bank_id);
+                    if (!flow || flow.events.length === 0) return null;
+
+                    return (
+                      <div key={account.id} className="border rounded-lg p-4">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="px-2 py-0.5 rounded text-xs font-bold text-white"
+                              style={{ backgroundColor: bank?.color || "#666" }}
+                            >
+                              {bank?.short_name || bank?.name?.slice(0, 2)}
+                            </div>
+                            <span className="font-semibold">{account.name}</span>
+                            {account.is_premium && (
+                              <Badge variant="secondary">⭐ Prémium</Badge>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-4 text-sm">
+                            <span className="text-green-600 flex items-center gap-1">
+                              <TrendingUp className="h-4 w-4" />
+                              +{formatCurrency(flow.totalInflow)}
+                            </span>
+                            <span className="text-red-600 flex items-center gap-1">
+                              <TrendingDown className="h-4 w-4" />
+                              -{formatCurrency(flow.totalOutflow)}
+                            </span>
+                            <span className={`font-bold ${flow.netFlow >= 0 ? "text-green-600" : "text-red-600"}`}>
+                              = {formatCurrency(flow.netFlow)}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Events table */}
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b">
+                                <th className="text-left py-2 px-2">Den</th>
+                                <th className="text-left py-2 px-2">Popis</th>
+                                <th className="text-right py-2 px-2">Částka</th>
+                                <th className="text-right py-2 px-2">Zůstatek</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(() => {
+                                let balance = 0;
+                                return flow.events.map((event, idx) => {
+                                  balance += event.amount;
+                                  const isNegative = balance < 0;
+                                  return (
+                                    <tr key={idx} className={`border-b ${isNegative ? "bg-red-50" : ""}`}>
+                                      <td className="py-2 px-2 font-mono">{event.day}.</td>
+                                      <td className="py-2 px-2">
+                                        {event.type === "income" && "💰 "}
+                                        {event.type === "transfer_in" && "⬇️ "}
+                                        {event.type === "transfer_out" && "⬆️ "}
+                                        {event.description}
+                                      </td>
+                                      <td className={`py-2 px-2 text-right font-mono ${event.amount >= 0 ? "text-green-600" : "text-red-600"}`}>
+                                        {event.amount >= 0 ? "+" : ""}{formatCurrency(event.amount)}
+                                      </td>
+                                      <td className={`py-2 px-2 text-right font-mono font-bold ${isNegative ? "text-red-600" : ""}`}>
+                                        {formatCurrency(balance)}
+                                        {isNegative && " ⚠️"}
+                                      </td>
+                                    </tr>
+                                  );
+                                });
+                              })()}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {flow.hasNegativeBalance && (
+                          <div className="mt-3 p-2 bg-red-100 rounded text-red-700 text-sm flex items-center gap-2">
+                            <AlertTriangle className="h-4 w-4" />
+                            Tento účet bude během měsíce v mínusu! Minimální zůstatek: {formatCurrency(flow.minBalance)}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -185,7 +346,7 @@ export function MoneyFlow() {
                     <Calendar className="h-5 w-5" />
                     Měsíční timeline
                   </CardTitle>
-                  <Badge variant="secondary">Celkem: {formatCurrency(totalAmount)}</Badge>
+                  <Badge variant="secondary">Celkem převodů: {formatCurrency(totalAmount)}</Badge>
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">

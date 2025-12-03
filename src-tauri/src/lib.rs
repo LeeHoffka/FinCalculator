@@ -96,6 +96,7 @@ pub fn run() {
             commands::delete_household_member,
             // Member Incomes
             commands::get_member_incomes,
+            commands::get_all_incomes,
             commands::create_member_income,
             commands::delete_member_income,
             // Scheduled Transfers

@@ -91,6 +91,36 @@ pub fn get_member_incomes(member_id: i64) -> Result<Vec<MemberIncome>> {
 }
 
 #[tauri::command]
+pub fn get_all_incomes() -> Result<Vec<MemberIncome>> {
+    log::info!("get_all_incomes called");
+    let conn = get_connection()?;
+    let mut stmt = conn.prepare(
+        "SELECT id, member_id, name, amount, frequency, day_of_month, account_id, is_active, created_at, updated_at 
+         FROM member_incomes 
+         WHERE is_active = 1
+         ORDER BY day_of_month ASC"
+    )?;
+    
+    let incomes = stmt.query_map([], |row| {
+        Ok(MemberIncome {
+            id: Some(row.get(0)?),
+            member_id: row.get(1)?,
+            name: row.get(2)?,
+            amount: row.get(3)?,
+            frequency: row.get(4)?,
+            day_of_month: row.get(5)?,
+            account_id: row.get(6)?,
+            is_active: row.get::<_, i32>(7)? == 1,
+            created_at: row.get(8)?,
+            updated_at: row.get(9)?,
+        })
+    })?.collect::<std::result::Result<Vec<_>, _>>()?;
+    
+    log::info!("get_all_incomes: returning {} incomes", incomes.len());
+    Ok(incomes)
+}
+
+#[tauri::command]
 pub fn create_member_income(input: CreateIncomeInput) -> Result<MemberIncome> {
     let conn = get_connection()?;
     let frequency = input.frequency.unwrap_or_else(|| "monthly".to_string());

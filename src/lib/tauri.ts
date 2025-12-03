@@ -58,6 +58,8 @@ function handleMockCommand<T>(cmd: string, args?: Record<string, unknown>): T {
       const memberId = args?.memberId as number;
       return mockStorage.incomes.filter((i) => i.member_id === memberId) as T;
     }
+    case "get_all_incomes":
+      return mockStorage.incomes as T;
     case "create_member_income": {
       const input = args?.input as Omit<MemberIncome, "id">;
       const income: MemberIncome = { id, ...input, is_active: true };
@@ -330,6 +332,13 @@ export const transfersApi = {
     category?: string;
   }) => invoke<ScheduledTransfer>("create_scheduled_transfer", { input }),
   deleteTransfer: (id: number) => invoke<void>("delete_scheduled_transfer", { id }),
+};
+
+// ============================================
+// INCOMES (ALL)
+// ============================================
+export const incomesApi = {
+  getIncomes: () => invoke<MemberIncome[]>("get_all_incomes"),
 };
 
 // ============================================
