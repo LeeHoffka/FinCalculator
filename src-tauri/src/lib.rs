@@ -43,6 +43,7 @@ pub fn run() {
             commands::update_account,
             commands::delete_account,
             commands::get_account_balance,
+            commands::set_account_balance,
             // Categories
             commands::create_category,
             commands::get_categories,
@@ -102,10 +103,12 @@ pub fn run() {
             // Scheduled Transfers
             commands::get_scheduled_transfers,
             commands::create_scheduled_transfer,
+            commands::update_scheduled_transfer,
             commands::delete_scheduled_transfer,
             // Fixed Expenses
             commands::get_fixed_expenses,
             commands::create_fixed_expense,
+            commands::update_fixed_expense,
             commands::delete_fixed_expense,
             // Budget Categories
             commands::get_budget_categories,

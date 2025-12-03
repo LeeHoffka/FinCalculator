@@ -16,10 +16,11 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useMembers } from "@/hooks/useHousehold";
 import { useBanksWithAccounts } from "@/hooks/useBanksAccounts";
-import { useTransfersTimeline } from "@/hooks/useTransfers";
+import { useTransfersTimeline, useScheduledTransfers } from "@/hooks/useTransfers";
 import { useBudgetSummary } from "@/hooks/useBudget";
 import { householdApi, type MemberIncome } from "@/lib/tauri";
 import { formatCurrency } from "@/utils/currency";
+import { TRANSFER_CATEGORIES } from "@/pages/MoneyFlow";
 
 // Helper to convert frequency to monthly
 const toMonthlyAmount = (amount: number, frequency: string): number => {
@@ -38,7 +39,19 @@ export function Dashboard() {
   const { data: members, isLoading: membersLoading } = useMembers();
   const { banks, accounts } = useBanksWithAccounts();
   const { timeline } = useTransfersTimeline();
+  const { data: allTransfers } = useScheduledTransfers();
   const { totalFixedExpenses, totalBudgets, isLoading: budgetLoading } = useBudgetSummary();
+
+  // Calculate transfers by category
+  const transfersByCategory = (allTransfers || []).reduce((acc, transfer) => {
+    const category = transfer.category || "technical";
+    acc[category] = (acc[category] || 0) + transfer.amount;
+    return acc;
+  }, {} as Record<string, number>);
+  
+  const mortgageTotal = transfersByCategory["mortgage"] || 0;
+  const savingsTotal = transfersByCategory["savings"] || 0;
+  const budgetAllocations = transfersByCategory["budget"] || 0;
 
   // Store incomes per member
   const [memberIncomes, setMemberIncomes] = useState<Record<number, MemberIncome[]>>({});
@@ -79,7 +92,8 @@ export function Dashboard() {
       .reduce((s, i) => s + toMonthlyAmount(i.amount, i.frequency), 0);
   }, 0);
 
-  const remaining = totalMonthlyIncome - totalFixedExpenses - totalBudgets;
+  // Calculate remaining - subtract fixed expenses, budgets, mortgage, savings, and budget allocations
+  const remaining = totalMonthlyIncome - totalFixedExpenses - totalBudgets - mortgageTotal - savingsTotal - budgetAllocations;
 
   const hasMembers = (members || []).length > 0;
   const hasBanks = banks.length > 0;
@@ -87,6 +101,9 @@ export function Dashboard() {
   // Calculate percentages
   const fixedPercentage = totalMonthlyIncome > 0 ? (totalFixedExpenses / totalMonthlyIncome) * 100 : 0;
   const budgetsPercentage = totalMonthlyIncome > 0 ? (totalBudgets / totalMonthlyIncome) * 100 : 0;
+  const mortgagePercentage = totalMonthlyIncome > 0 ? (mortgageTotal / totalMonthlyIncome) * 100 : 0;
+  const savingsPercentage = totalMonthlyIncome > 0 ? (savingsTotal / totalMonthlyIncome) * 100 : 0;
+  const budgetAllocPercentage = totalMonthlyIncome > 0 ? (budgetAllocations / totalMonthlyIncome) * 100 : 0;
   const remainingPercentage = totalMonthlyIncome > 0 ? (remaining / totalMonthlyIncome) * 100 : 0;
 
   if (membersLoading || incomesLoading || budgetLoading) {
@@ -229,6 +246,51 @@ export function Dashboard() {
                   <span>Zbývá: {formatCurrency(remaining)}</span>
                 </div>
               </div>
+
+              {/* Transfer Categories Detail */}
+              {(mortgageTotal > 0 || savingsTotal > 0 || budgetAllocations > 0) && (
+                <div className="mt-4 pt-4 border-t">
+                  <p className="text-sm font-medium text-muted-foreground mb-2">📤 Převody (zahrnuty v rozpočtu):</p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    {mortgageTotal > 0 && (
+                      <div className="flex items-center gap-2 p-2 bg-slate-100 rounded text-sm">
+                        <span>🏠</span>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Hypotéka/Splátky</p>
+                          <p className="font-semibold text-red-600">-{formatCurrency(mortgageTotal)}</p>
+                        </div>
+                      </div>
+                    )}
+                    {savingsTotal > 0 && (
+                      <div className="flex items-center gap-2 p-2 bg-slate-100 rounded text-sm">
+                        <span>💰</span>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Spoření</p>
+                          <p className="font-semibold text-amber-600">-{formatCurrency(savingsTotal)}</p>
+                        </div>
+                      </div>
+                    )}
+                    {budgetAllocations > 0 && (
+                      <div className="flex items-center gap-2 p-2 bg-slate-100 rounded text-sm">
+                        <span>🍽️</span>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Budget alokace</p>
+                          <p className="font-semibold text-orange-600">-{formatCurrency(budgetAllocations)}</p>
+                        </div>
+                      </div>
+                    )}
+                    {(transfersByCategory["technical"] || 0) > 0 && (
+                      <div className="flex items-center gap-2 p-2 bg-slate-100 rounded text-sm">
+                        <span>🔄</span>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Technické převody</p>
+                          <p className="font-semibold text-gray-600">{formatCurrency(transfersByCategory["technical"] || 0)}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>

@@ -144,7 +144,7 @@ pub fn export_full_backup() -> Result<FullBackup> {
     
     // Get fixed expenses
     let mut expenses_stmt = conn.prepare(
-        "SELECT id, name, amount, category, frequency, day_of_month, assigned_to, is_active, notes, created_at, updated_at 
+        "SELECT id, name, amount, category, frequency, day_of_month, account_id, assigned_to, is_active, notes, created_at, updated_at 
          FROM fixed_expenses"
     )?;
     let expenses: Vec<FixedExpense> = expenses_stmt.query_map([], |row| {
@@ -155,11 +155,12 @@ pub fn export_full_backup() -> Result<FullBackup> {
             category: row.get(3)?,
             frequency: row.get(4)?,
             day_of_month: row.get(5)?,
-            assigned_to: row.get(6)?,
-            is_active: row.get::<_, i32>(7)? == 1,
-            notes: row.get(8)?,
-            created_at: row.get(9)?,
-            updated_at: row.get(10)?,
+            account_id: row.get(6)?,
+            assigned_to: row.get(7)?,
+            is_active: row.get::<_, i32>(8)? == 1,
+            notes: row.get(9)?,
+            created_at: row.get(10)?,
+            updated_at: row.get(11)?,
         })
     })?.collect::<std::result::Result<Vec<_>, _>>()?;
     

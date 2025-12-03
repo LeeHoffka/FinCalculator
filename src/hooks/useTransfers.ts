@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { transfersApi, incomesApi, accountsApi, type ScheduledTransfer, type MemberIncome, type Account } from "@/lib/tauri";
+import { transfersApi, incomesApi, accountsApi, expensesApi, type ScheduledTransfer, type MemberIncome, type Account, type FixedExpense } from "@/lib/tauri";
 
 export function useScheduledTransfers() {
   return useQuery({
@@ -13,6 +13,18 @@ export function useCreateTransfer() {
 
   return useMutation({
     mutationFn: transfersApi.createTransfer,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["scheduled-transfers"] });
+    },
+  });
+}
+
+export function useUpdateTransfer() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, input }: { id: number; input: Parameters<typeof transfersApi.updateTransfer>[1] }) =>
+      transfersApi.updateTransfer(id, input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["scheduled-transfers"] });
     },
@@ -75,7 +87,7 @@ export function useTransfersTimeline() {
 // ============================================
 export interface CashFlowEvent {
   day: number;
-  type: "income" | "transfer_out" | "transfer_in";
+  type: "income" | "transfer_out" | "transfer_in" | "expense";
   description: string;
   amount: number;
   accountId: number;
@@ -84,12 +96,14 @@ export interface CashFlowEvent {
 
 export interface AccountCashFlow {
   accountId: number;
+  initialBalance: number;
   events: CashFlowEvent[];
   totalInflow: number;
   totalOutflow: number;
   netFlow: number;
   runningBalances: { day: number; balance: number }[];
   minBalance: number;
+  endOfMonthBalance: number;
   hasNegativeBalance: boolean;
 }
 
@@ -99,27 +113,33 @@ export function useCashFlowAnalysis() {
     queryKey: ["member-incomes"],
     queryFn: incomesApi.getIncomes,
   });
+  const { data: expenses, isLoading: expensesLoading } = useQuery({
+    queryKey: ["fixed-expenses"],
+    queryFn: expensesApi.getExpenses,
+  });
   const { data: accounts, isLoading: accountsLoading } = useQuery({
     queryKey: ["accounts"],
     queryFn: () => accountsApi.getAccounts(true),
   });
 
-  const isLoading = transfersLoading || incomesLoading || accountsLoading;
+  const isLoading = transfersLoading || incomesLoading || expensesLoading || accountsLoading;
 
   // Build cash flow for each account
   const accountCashFlows: Map<number, AccountCashFlow> = new Map();
 
-  if (!isLoading && accounts && transfers && incomes) {
-    // Initialize accounts
+  if (!isLoading && accounts && transfers && incomes && expenses) {
+    // Initialize accounts with their current balance
     for (const acc of accounts) {
       accountCashFlows.set(acc.id, {
         accountId: acc.id,
+        initialBalance: acc.current_balance || 0,
         events: [],
         totalInflow: 0,
         totalOutflow: 0,
         netFlow: 0,
         runningBalances: [],
         minBalance: 0,
+        endOfMonthBalance: 0,
         hasNegativeBalance: false,
       });
     }
@@ -142,6 +162,26 @@ export function useCashFlowAnalysis() {
           accountId: income.account_id!,
         });
         flow.totalInflow += monthlyAmount;
+      }
+    }
+
+    // Add fixed expenses
+    for (const expense of expenses.filter(e => e.is_active && e.account_id)) {
+      const flow = accountCashFlows.get(expense.account_id!);
+      if (flow) {
+        // Convert to monthly amount
+        let monthlyAmount = expense.amount;
+        if (expense.frequency === "quarterly") monthlyAmount /= 3;
+        else if (expense.frequency === "yearly") monthlyAmount /= 12;
+
+        flow.events.push({
+          day: expense.day_of_month || 1,
+          type: "expense",
+          description: `${expense.name} (${expense.category})`,
+          amount: -monthlyAmount,
+          accountId: expense.account_id!,
+        });
+        flow.totalOutflow += monthlyAmount;
       }
     }
 
@@ -182,9 +222,12 @@ export function useCashFlowAnalysis() {
       flow.events.sort((a, b) => a.day - b.day);
       flow.netFlow = flow.totalInflow - flow.totalOutflow;
 
-      // Calculate running balance starting from 0
-      let balance = 0;
+      // Calculate running balance starting from current balance
+      let balance = flow.initialBalance;
       const dayBalances: Map<number, number> = new Map();
+      
+      // Add initial balance at day 0
+      dayBalances.set(0, balance);
 
       for (const event of flow.events) {
         balance += event.amount;
@@ -196,8 +239,9 @@ export function useCashFlowAnalysis() {
         .sort((a, b) => a[0] - b[0])
         .map(([day, bal]) => ({ day, balance: bal }));
 
-      // Find minimum balance
-      flow.minBalance = Math.min(0, ...flow.runningBalances.map(rb => rb.balance));
+      // Find minimum balance during the month
+      flow.minBalance = Math.min(...flow.runningBalances.map(rb => rb.balance));
+      flow.endOfMonthBalance = balance;
       flow.hasNegativeBalance = flow.minBalance < 0;
     }
   }

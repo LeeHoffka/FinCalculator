@@ -241,6 +241,55 @@ pub fn create_scheduled_transfer(input: CreateTransferInput) -> Result<Scheduled
 }
 
 #[tauri::command]
+pub fn update_scheduled_transfer(id: i64, input: CreateTransferInput) -> Result<ScheduledTransfer> {
+    log::info!("update_scheduled_transfer called: id={}", id);
+    let conn = get_connection()?;
+    let category = input.category.unwrap_or_else(|| "internal".to_string());
+    
+    conn.execute(
+        "UPDATE scheduled_transfers SET name = ?1, from_account_id = ?2, to_account_id = ?3, 
+         amount = ?4, day_of_month = ?5, description = ?6, category = ?7, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?8",
+        (
+            &input.name,
+            input.from_account_id,
+            input.to_account_id,
+            input.amount,
+            input.day_of_month,
+            &input.description,
+            &category,
+            id,
+        ),
+    )?;
+    
+    // Return updated transfer
+    let transfer = conn.query_row(
+        "SELECT id, name, from_account_id, to_account_id, amount, day_of_month, description, category, display_order, is_active, created_at, updated_at 
+         FROM scheduled_transfers WHERE id = ?1",
+        [id],
+        |row| {
+            Ok(ScheduledTransfer {
+                id: Some(row.get(0)?),
+                name: row.get(1)?,
+                from_account_id: row.get(2)?,
+                to_account_id: row.get(3)?,
+                amount: row.get(4)?,
+                day_of_month: row.get(5)?,
+                description: row.get(6)?,
+                category: row.get(7)?,
+                display_order: row.get(8)?,
+                is_active: row.get::<_, i32>(9)? == 1,
+                created_at: row.get(10)?,
+                updated_at: row.get(11)?,
+            })
+        },
+    )?;
+    
+    log::info!("update_scheduled_transfer: done");
+    Ok(transfer)
+}
+
+#[tauri::command]
 pub fn delete_scheduled_transfer(id: i64) -> Result<()> {
     let conn = get_connection()?;
     conn.execute("DELETE FROM scheduled_transfers WHERE id = ?1", [id])?;
@@ -253,12 +302,13 @@ pub fn delete_scheduled_transfer(id: i64) -> Result<()> {
 
 #[tauri::command]
 pub fn get_fixed_expenses() -> Result<Vec<FixedExpense>> {
+    log::info!("get_fixed_expenses called");
     let conn = get_connection()?;
     let mut stmt = conn.prepare(
-        "SELECT id, name, amount, category, frequency, day_of_month, assigned_to, is_active, notes, created_at, updated_at 
+        "SELECT id, name, amount, category, frequency, day_of_month, account_id, assigned_to, is_active, notes, created_at, updated_at 
          FROM fixed_expenses 
          WHERE is_active = 1
-         ORDER BY category ASC, name ASC"
+         ORDER BY day_of_month ASC, category ASC, name ASC"
     )?;
     
     let expenses = stmt.query_map([], |row| {
@@ -269,38 +319,43 @@ pub fn get_fixed_expenses() -> Result<Vec<FixedExpense>> {
             category: row.get(3)?,
             frequency: row.get(4)?,
             day_of_month: row.get(5)?,
-            assigned_to: row.get(6)?,
-            is_active: row.get::<_, i32>(7)? == 1,
-            notes: row.get(8)?,
-            created_at: row.get(9)?,
-            updated_at: row.get(10)?,
+            account_id: row.get(6)?,
+            assigned_to: row.get(7)?,
+            is_active: row.get::<_, i32>(8)? == 1,
+            notes: row.get(9)?,
+            created_at: row.get(10)?,
+            updated_at: row.get(11)?,
         })
     })?.collect::<std::result::Result<Vec<_>, _>>()?;
     
+    log::info!("get_fixed_expenses: returning {} expenses", expenses.len());
     Ok(expenses)
 }
 
 #[tauri::command]
 pub fn create_fixed_expense(input: CreateFixedExpenseInput) -> Result<FixedExpense> {
+    log::info!("create_fixed_expense called: {:?}", input.name);
     let conn = get_connection()?;
     let frequency = input.frequency.unwrap_or_else(|| "monthly".to_string());
     let assigned_to = input.assigned_to.unwrap_or_else(|| "shared".to_string());
     
     conn.execute(
-        "INSERT INTO fixed_expenses (name, amount, category, frequency, day_of_month, assigned_to, is_active, notes) 
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7)",
+        "INSERT INTO fixed_expenses (name, amount, category, frequency, day_of_month, account_id, assigned_to, is_active, notes) 
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8)",
         (
             &input.name,
             input.amount,
             &input.category,
             &frequency,
             input.day_of_month,
+            input.account_id,
             &assigned_to,
             &input.notes,
         ),
     )?;
     
     let id = conn.last_insert_rowid();
+    log::info!("create_fixed_expense: done, id={}", id);
     
     Ok(FixedExpense {
         id: Some(id),
@@ -309,12 +364,64 @@ pub fn create_fixed_expense(input: CreateFixedExpenseInput) -> Result<FixedExpen
         category: input.category,
         frequency,
         day_of_month: input.day_of_month,
+        account_id: input.account_id,
         assigned_to: Some(assigned_to),
         is_active: true,
         notes: input.notes,
         created_at: None,
         updated_at: None,
     })
+}
+
+#[tauri::command]
+pub fn update_fixed_expense(id: i64, input: CreateFixedExpenseInput) -> Result<FixedExpense> {
+    log::info!("update_fixed_expense called: id={}", id);
+    let conn = get_connection()?;
+    let frequency = input.frequency.unwrap_or_else(|| "monthly".to_string());
+    let assigned_to = input.assigned_to.unwrap_or_else(|| "shared".to_string());
+    
+    conn.execute(
+        "UPDATE fixed_expenses SET name = ?1, amount = ?2, category = ?3, frequency = ?4, 
+         day_of_month = ?5, account_id = ?6, assigned_to = ?7, notes = ?8, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?9",
+        (
+            &input.name,
+            input.amount,
+            &input.category,
+            &frequency,
+            input.day_of_month,
+            input.account_id,
+            &assigned_to,
+            &input.notes,
+            id,
+        ),
+    )?;
+    
+    // Return updated expense
+    let expense = conn.query_row(
+        "SELECT id, name, amount, category, frequency, day_of_month, account_id, assigned_to, is_active, notes, created_at, updated_at 
+         FROM fixed_expenses WHERE id = ?1",
+        [id],
+        |row| {
+            Ok(FixedExpense {
+                id: Some(row.get(0)?),
+                name: row.get(1)?,
+                amount: row.get(2)?,
+                category: row.get(3)?,
+                frequency: row.get(4)?,
+                day_of_month: row.get(5)?,
+                account_id: row.get(6)?,
+                assigned_to: row.get(7)?,
+                is_active: row.get::<_, i32>(8)? == 1,
+                notes: row.get(9)?,
+                created_at: row.get(10)?,
+                updated_at: row.get(11)?,
+            })
+        },
+    )?;
+    
+    log::info!("update_fixed_expense: done");
+    Ok(expense)
 }
 
 #[tauri::command]

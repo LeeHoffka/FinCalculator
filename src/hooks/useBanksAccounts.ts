@@ -7,7 +7,17 @@ import { banksApi, accountsApi, type Bank, type BankAccount } from "@/lib/tauri"
 export function useBanks() {
   return useQuery({
     queryKey: ["banks"],
-    queryFn: banksApi.getBanks,
+    queryFn: async () => {
+      console.log("[useBanks] Fetching banks...");
+      try {
+        const result = await banksApi.getBanks();
+        console.log("[useBanks] Got banks:", result);
+        return result;
+      } catch (error) {
+        console.error("[useBanks] ERROR:", error);
+        throw error;
+      }
+    },
   });
 }
 
@@ -40,7 +50,12 @@ export function useDeleteBank() {
 export function useAccounts() {
   return useQuery({
     queryKey: ["accounts"],
-    queryFn: accountsApi.getAccounts,
+    queryFn: async () => {
+      console.log("[useAccounts] Fetching accounts...");
+      const result = await accountsApi.getAccounts();
+      console.log("[useAccounts] Got accounts:", result);
+      return result;
+    },
   });
 }
 
@@ -49,6 +64,18 @@ export function useCreateAccount() {
 
   return useMutation({
     mutationFn: accountsApi.createAccount,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+    },
+  });
+}
+
+export function useUpdateAccount() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, input }: { id: number; input: Parameters<typeof accountsApi.updateAccount>[1] }) =>
+      accountsApi.updateAccount(id, input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["accounts"] });
     },

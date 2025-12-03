@@ -48,12 +48,13 @@ pub fn create_bank(input: CreateBankInput) -> Result<Bank> {
 }
 
 #[tauri::command]
-pub fn get_banks(active_only: bool) -> Result<Vec<Bank>> {
-    log::info!("get_banks called, active_only: {}", active_only);
+pub fn get_banks(active_only: Option<bool>) -> Result<Vec<Bank>> {
+    let filter_active = active_only.unwrap_or(true);
+    log::info!("get_banks called, active_only: {}", filter_active);
     let conn = get_connection()?;
     log::info!("get_banks: got connection");
 
-    let query = if active_only {
+    let query = if filter_active {
         "SELECT id, name, short_name, logo, color, notes, active, created_at, updated_at FROM banks WHERE active = 1 ORDER BY name"
     } else {
         "SELECT id, name, short_name, logo, color, notes, active, created_at, updated_at FROM banks ORDER BY name"

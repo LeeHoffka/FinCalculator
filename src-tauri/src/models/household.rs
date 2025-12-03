@@ -48,6 +48,7 @@ pub struct FixedExpense {
     pub category: String,
     pub frequency: String,
     pub day_of_month: Option<i32>,
+    pub account_id: Option<i64>,
     pub assigned_to: Option<String>,
     pub is_active: bool,
     pub notes: Option<String>,
@@ -104,6 +105,7 @@ pub struct CreateFixedExpenseInput {
     pub category: String,
     pub frequency: Option<String>,
     pub day_of_month: Option<i32>,
+    pub account_id: Option<i64>,
     pub assigned_to: Option<String>,
     pub notes: Option<String>,
 }

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, Trash2, Building2, Loader2 } from "lucide-react";
+import { Plus, Trash2, Building2, Loader2, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -24,9 +24,12 @@ import {
   useCreateBank,
   useDeleteBank,
   useCreateAccount,
+  useUpdateAccount,
   useDeleteAccount,
 } from "@/hooks/useBanksAccounts";
 import { useMembers } from "@/hooks/useHousehold";
+import { formatCurrency } from "@/utils/currency";
+import type { BankAccount } from "@/lib/tauri";
 
 const COMMON_BANKS = [
   { name: "Česká spořitelna", shortName: "ČS", color: "#0066b3" },
@@ -44,19 +47,25 @@ const ACCOUNT_TYPES = [
   { value: "savings", label: "Spořicí účet", icon: "🏦" },
   { value: "mortgage", label: "Hypoteční účet", icon: "🏠" },
   { value: "premium", label: "Prémiový účet", icon: "⭐" },
+  { value: "credit_card", label: "Kreditní karta", icon: "💎" },
 ];
 
 export function BanksAccounts() {
-  const { banksWithAccounts, isLoading } = useBanksWithAccounts();
+  const { banksWithAccounts, banks, accounts, isLoading } = useBanksWithAccounts();
   const { data: members } = useMembers();
+  
+  // Debug logging
+  console.log("[BanksAccounts] isLoading:", isLoading, "banks:", banks?.length, "accounts:", accounts?.length, "banksWithAccounts:", banksWithAccounts?.length);
   const createBank = useCreateBank();
   const deleteBank = useDeleteBank();
   const createAccount = useCreateAccount();
+  const updateAccount = useUpdateAccount();
   const deleteAccount = useDeleteAccount();
 
   const [isBankDialogOpen, setIsBankDialogOpen] = useState(false);
   const [isAccountDialogOpen, setIsAccountDialogOpen] = useState(false);
   const [selectedBankId, setSelectedBankId] = useState<number | null>(null);
+  const [editingAccount, setEditingAccount] = useState<BankAccount | null>(null);
 
   const [bankForm, setBankForm] = useState({
     name: "",
@@ -70,8 +79,10 @@ export function BanksAccounts() {
     account_type: "checking",
     account_number: "",
     owner_user_id: undefined as number | undefined,
+    initial_balance: 0,
     is_premium: false,
     premium_min_flow: undefined as number | undefined,
+    credit_limit: undefined as number | undefined,
   });
 
   const handleAddBank = async (e: React.FormEvent) => {
@@ -97,27 +108,95 @@ export function BanksAccounts() {
 
   const handleAddAccount = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (selectedBankId) {
-      await createAccount.mutateAsync({
-        ...accountForm,
-        bank_id: selectedBankId,
-        currency: "CZK",
-      });
-      setAccountForm({
-        name: "",
-        account_type: "checking",
-        account_number: "",
-        owner_user_id: undefined,
-        is_premium: false,
-        premium_min_flow: undefined,
-      });
+    try {
+      if (editingAccount) {
+        // Update existing account
+        await updateAccount.mutateAsync({
+          id: editingAccount.id,
+          input: {
+            name: accountForm.name,
+            account_type: accountForm.account_type,
+            bank_id: editingAccount.bank_id,
+            owner_user_id: accountForm.owner_user_id,
+            account_number: accountForm.account_number,
+            currency: "CZK",
+            is_premium: accountForm.is_premium,
+            premium_min_flow: accountForm.premium_min_flow,
+            credit_limit: accountForm.credit_limit,
+            current_balance: accountForm.initial_balance,
+            active: true,
+          },
+        });
+      } else if (selectedBankId) {
+        // Create new account
+        const newAccountData = {
+          ...accountForm,
+          bank_id: selectedBankId,
+          currency: "CZK",
+        };
+        console.log("[BanksAccounts] Creating account:", newAccountData);
+        await createAccount.mutateAsync(newAccountData);
+        console.log("[BanksAccounts] Account created successfully");
+      }
+      resetAccountForm();
       setIsAccountDialogOpen(false);
+    } catch (error) {
+      console.error("Failed to save account:", error);
+      alert("Chyba při ukládání účtu: " + (error as Error).message);
     }
   };
 
+  const resetAccountForm = () => {
+    setAccountForm({
+      name: "",
+      account_type: "checking",
+      account_number: "",
+      owner_user_id: undefined,
+      initial_balance: 0,
+      is_premium: false,
+      premium_min_flow: undefined,
+      credit_limit: undefined,
+    });
+    setEditingAccount(null);
+    setSelectedBankId(null);
+  };
+
   const openAccountDialog = (bankId: number) => {
+    setEditingAccount(null);
+    // Reset form first, then set bankId (resetAccountForm sets selectedBankId to null)
+    setAccountForm({
+      name: "",
+      account_type: "checking",
+      account_number: "",
+      owner_user_id: undefined,
+      initial_balance: 0,
+      is_premium: false,
+      premium_min_flow: undefined,
+      credit_limit: undefined,
+    });
     setSelectedBankId(bankId);
     setIsAccountDialogOpen(true);
+  };
+
+  const openEditAccountDialog = (account: BankAccount) => {
+    setEditingAccount(account);
+    setSelectedBankId(account.bank_id);
+    setAccountForm({
+      name: account.name,
+      account_type: account.account_type,
+      account_number: account.account_number || "",
+      owner_user_id: account.owner_user_id,
+      initial_balance: account.current_balance || 0,
+      is_premium: account.is_premium || false,
+      premium_min_flow: account.premium_min_flow,
+      credit_limit: account.credit_limit,
+    });
+    setIsAccountDialogOpen(true);
+  };
+
+  const handleCloseAccountDialog = () => {
+    setIsAccountDialogOpen(false);
+    resetAccountForm();
   };
 
   if (isLoading) {
@@ -200,16 +279,26 @@ export function BanksAccounts() {
                           <div className="flex items-start gap-3">
                             <span className="text-2xl">{typeInfo?.icon || "💳"}</span>
                             <div>
-                              <p className="font-medium">{account.name}</p>
+                              <div className="flex items-center gap-2">
+                                <p className="font-medium">{account.name}</p>
+                                <span className="text-sm font-semibold text-blue-600">
+                                  {formatCurrency(account.current_balance || 0)}
+                                </span>
+                              </div>
                               {account.account_number && (
                                 <p className="text-xs font-mono text-muted-foreground">
                                   {account.account_number}
                                 </p>
                               )}
                               <div className="flex flex-wrap gap-1 mt-1">
+                                {account.account_type === "credit_card" && account.credit_limit && (
+                                  <Badge variant="outline" className="text-xs border-purple-400 text-purple-600">
+                                    💎 Limit: {formatCurrency(account.credit_limit)}
+                                  </Badge>
+                                )}
                                 {account.is_premium && (
                                   <Badge variant="secondary" className="text-xs">
-                                    ⭐ Prémium
+                                    ⭐ Prémium {account.premium_min_flow && `(min. ${formatCurrency(account.premium_min_flow)})`}
                                   </Badge>
                                 )}
                                 {owner && (
@@ -220,14 +309,24 @@ export function BanksAccounts() {
                               </div>
                             </div>
                           </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-red-500 hover:text-red-600 h-8 w-8 p-0"
-                            onClick={() => deleteAccount.mutate(account.id)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0"
+                              onClick={() => openEditAccountDialog(account)}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-red-500 hover:text-red-600 h-8 w-8 p-0"
+                              onClick={() => deleteAccount.mutate(account.id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </div>
                       );
                     })}
@@ -347,12 +446,12 @@ export function BanksAccounts() {
         </DialogContent>
       </Dialog>
 
-      {/* Add Account Dialog */}
-      <Dialog open={isAccountDialogOpen} onOpenChange={setIsAccountDialogOpen}>
+      {/* Add/Edit Account Dialog */}
+      <Dialog open={isAccountDialogOpen} onOpenChange={handleCloseAccountDialog}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              Přidat účet
+              {editingAccount ? "Upravit účet" : "Přidat účet"}
               {selectedBankId && (
                 <span className="text-muted-foreground font-normal ml-2">
                   ({banksWithAccounts.find((b) => b.bank.id === selectedBankId)?.bank.name})
@@ -432,6 +531,26 @@ export function BanksAccounts() {
               </div>
             </div>
 
+            <div className="space-y-2">
+              <Label htmlFor="initialBalance">Aktuální zůstatek na účtu</Label>
+              <Input
+                id="initialBalance"
+                type="number"
+                step="100"
+                value={accountForm.initial_balance || ""}
+                onChange={(e) =>
+                  setAccountForm({
+                    ...accountForm,
+                    initial_balance: parseFloat(e.target.value) || 0,
+                  })
+                }
+                placeholder="např. 50000"
+              />
+              <p className="text-xs text-muted-foreground">
+                Zadejte kolik máte aktuálně na účtu. Používá se pro výpočet cash flow.
+              </p>
+            </div>
+
             <div className="flex items-center gap-4">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
@@ -464,16 +583,42 @@ export function BanksAccounts() {
               </div>
             )}
 
+            {accountForm.account_type === "credit_card" && (
+              <div className="space-y-2 p-3 bg-purple-50 rounded-lg border border-purple-200">
+                <Label htmlFor="creditLimit" className="text-purple-700">💎 Limit kreditní karty</Label>
+                <Input
+                  id="creditLimit"
+                  type="number"
+                  step="1000"
+                  value={accountForm.credit_limit || ""}
+                  onChange={(e) =>
+                    setAccountForm({
+                      ...accountForm,
+                      credit_limit: parseFloat(e.target.value) || undefined,
+                    })
+                  }
+                  placeholder="např. 50000"
+                />
+                <p className="text-xs text-purple-600">
+                  Maximální částka kterou můžete z karty čerpat. Zůstatek = kolik vám zbývá.
+                </p>
+              </div>
+            )}
+
             <DialogFooter>
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setIsAccountDialogOpen(false)}
+                onClick={handleCloseAccountDialog}
               >
                 Zrušit
               </Button>
-              <Button type="submit" disabled={createAccount.isPending}>
-                {createAccount.isPending ? "Ukládám..." : "Přidat účet"}
+              <Button type="submit" disabled={createAccount.isPending || updateAccount.isPending}>
+                {createAccount.isPending || updateAccount.isPending
+                  ? "Ukládám..."
+                  : editingAccount
+                  ? "Uložit změny"
+                  : "Přidat účet"}
               </Button>
             </DialogFooter>
           </form>

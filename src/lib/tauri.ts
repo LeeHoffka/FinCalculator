@@ -2,8 +2,21 @@ import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 
 // Check if we're running in Tauri (v2)
 const isTauri = () => {
-  return typeof window !== "undefined" && 
-    (window as any).__TAURI_INTERNALS__ !== undefined;
+  if (typeof window === "undefined") return false;
+  
+  // Try multiple detection methods for Tauri v2
+  const win = window as any;
+  const hasTauri = 
+    win.__TAURI_INTERNALS__ !== undefined ||
+    win.__TAURI__ !== undefined ||
+    win.__TAURI_METADATA__ !== undefined;
+  
+  // Log for debugging
+  if (!hasTauri) {
+    console.log("[Tauri Detection] Not in Tauri environment, using mock data");
+  }
+  
+  return hasTauri;
 };
 
 // In-memory mock storage for browser development
@@ -21,7 +34,15 @@ const mockStorage = {
 // Generic invoke wrapper with mock fallback
 export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   if (isTauri()) {
-    return tauriInvoke<T>(cmd, args);
+    console.log(`[Tauri] Calling: ${cmd}`, args);
+    try {
+      const result = await tauriInvoke<T>(cmd, args);
+      console.log(`[Tauri] Result for ${cmd}:`, result);
+      return result;
+    } catch (error) {
+      console.error(`[Tauri] Error in ${cmd}:`, error);
+      throw error;
+    }
   }
   
   // Mock implementations for browser development
@@ -108,9 +129,10 @@ function handleMockCommand<T>(cmd: string, args?: Record<string, unknown>): T {
         account_number: input.account_number,
         currency: input.currency || "CZK",
         initial_balance: input.initial_balance || 0,
-        current_balance: input.current_balance || 0,
+        current_balance: input.current_balance || input.initial_balance || 0,
         is_premium: input.is_premium || false,
         premium_min_flow: input.premium_min_flow,
+        credit_limit: input.credit_limit,
         active: true,
       };
       mockStorage.accounts.push(account);
@@ -273,20 +295,21 @@ export interface BankAccount {
   icon?: string;
   is_premium: boolean;
   premium_min_flow?: number;
+  credit_limit?: number;
   active: boolean;
   created_at?: string;
   updated_at?: string;
 }
 
 export const banksApi = {
-  getBanks: () => invoke<Bank[]>("get_banks", { activeOnly: true }),
+  getBanks: () => invoke<Bank[]>("get_banks", { active_only: true }),
   createBank: (input: { name: string; short_name?: string; logo?: string; color?: string; notes?: string }) =>
     invoke<Bank>("create_bank", { input }),
   deleteBank: (id: number) => invoke<void>("delete_bank", { id }),
 };
 
 export const accountsApi = {
-  getAccounts: () => invoke<BankAccount[]>("get_accounts", { activeOnly: true }),
+  getAccounts: () => invoke<BankAccount[]>("get_accounts", { active_only: true }),
   createAccount: (input: {
     name: string;
     account_type: string;
@@ -298,7 +321,22 @@ export const accountsApi = {
     color?: string;
     is_premium?: boolean;
     premium_min_flow?: number;
+    credit_limit?: number;
   }) => invoke<BankAccount>("create_account", { input }),
+  updateAccount: (id: number, input: {
+    name: string;
+    account_type: string;
+    bank_id: number;
+    owner_user_id?: number;
+    account_number?: string;
+    currency?: string;
+    color?: string;
+    is_premium?: boolean;
+    premium_min_flow?: number;
+    credit_limit?: number;
+    current_balance?: number;
+    active?: boolean;
+  }) => invoke<BankAccount>("update_account", { id, input }),
   deleteAccount: (id: number) => invoke<void>("delete_account", { id }),
 };
 
@@ -331,6 +369,15 @@ export const transfersApi = {
     description?: string;
     category?: string;
   }) => invoke<ScheduledTransfer>("create_scheduled_transfer", { input }),
+  updateTransfer: (id: number, input: {
+    name: string;
+    from_account_id: number;
+    to_account_id: number;
+    amount: number;
+    day_of_month: number;
+    description?: string;
+    category?: string;
+  }) => invoke<ScheduledTransfer>("update_scheduled_transfer", { id, input }),
   deleteTransfer: (id: number) => invoke<void>("delete_scheduled_transfer", { id }),
 };
 
@@ -351,6 +398,7 @@ export interface FixedExpense {
   category: string;
   frequency: string;
   day_of_month?: number;
+  account_id?: number;
   assigned_to?: string;
   is_active: boolean;
   notes?: string;
@@ -366,9 +414,20 @@ export const expensesApi = {
     category: string;
     frequency?: string;
     day_of_month?: number;
+    account_id?: number;
     assigned_to?: string;
     notes?: string;
   }) => invoke<FixedExpense>("create_fixed_expense", { input }),
+  updateExpense: (id: number, input: {
+    name: string;
+    amount: number;
+    category: string;
+    frequency?: string;
+    day_of_month?: number;
+    account_id?: number;
+    assigned_to?: string;
+    notes?: string;
+  }) => invoke<FixedExpense>("update_fixed_expense", { id, input }),
   deleteExpense: (id: number) => invoke<void>("delete_fixed_expense", { id }),
 };
 

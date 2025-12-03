@@ -15,6 +15,7 @@ pub struct Account {
     pub icon: Option<String>,
     pub is_premium: bool,
     pub premium_min_flow: Option<f64>,
+    pub credit_limit: Option<f64>,
     pub active: bool,
     pub created_at: String,
     pub updated_at: String,
@@ -33,6 +34,7 @@ pub struct CreateAccountInput {
     pub icon: Option<String>,
     pub is_premium: Option<bool>,
     pub premium_min_flow: Option<f64>,
+    pub credit_limit: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -47,6 +49,8 @@ pub struct UpdateAccountInput {
     pub icon: Option<String>,
     pub is_premium: Option<bool>,
     pub premium_min_flow: Option<f64>,
+    pub credit_limit: Option<f64>,
+    pub current_balance: Option<f64>,
     pub active: bool,
 }
 

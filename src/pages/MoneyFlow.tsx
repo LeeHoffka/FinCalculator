@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Plus, Trash2, ArrowRight, Calendar, ChevronDown, ChevronUp, Loader2, AlertTriangle, TrendingUp, TrendingDown } from "lucide-react";
+import { Plus, Trash2, ArrowRight, Calendar, ChevronDown, ChevronUp, Loader2, AlertTriangle, TrendingUp, TrendingDown, Pencil } from "lucide-react";
+import type { ScheduledTransfer } from "@/lib/tauri";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -19,46 +20,84 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { useTransfersTimeline, useCreateTransfer, useDeleteTransfer, useCashFlowAnalysis } from "@/hooks/useTransfers";
+import { useTransfersTimeline, useCreateTransfer, useUpdateTransfer, useDeleteTransfer, useCashFlowAnalysis } from "@/hooks/useTransfers";
 import { useBanksWithAccounts } from "@/hooks/useBanksAccounts";
 import { formatCurrency } from "@/utils/currency";
+
+// Kategorie převodů
+export const TRANSFER_CATEGORIES = [
+  { value: "technical", label: "Technický převod", icon: "🔄", description: "Prémiové podmínky, mezi partnery" },
+  { value: "mortgage", label: "Hypotéka/Splátka", icon: "🏠", description: "Splátky úvěrů a hypoték" },
+  { value: "savings", label: "Spoření", icon: "💰", description: "Odkládání na spořicí účet" },
+  { value: "budget", label: "Budget alokace", icon: "🍽️", description: "Jídlo, zábava, transport..." },
+  { value: "credit_card", label: "Splátka kreditky", icon: "💎", description: "Úhrada kreditní karty" },
+];
+
+const emptyTransferForm = {
+  name: "",
+  from_account_id: 0,
+  to_account_id: 0,
+  amount: 0,
+  day_of_month: 1,
+  description: "",
+  category: "technical",
+};
 
 export function MoneyFlow() {
   const { timeline, totalAmount, isLoading: timelineLoading } = useTransfersTimeline();
   const { accounts, banks } = useBanksWithAccounts();
   const { premiumStatus, accountCashFlows, isLoading: cashFlowLoading } = useCashFlowAnalysis();
   const createTransfer = useCreateTransfer();
+  const updateTransfer = useUpdateTransfer();
   const deleteTransfer = useDeleteTransfer();
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingTransfer, setEditingTransfer] = useState<ScheduledTransfer | null>(null);
   const [expandedDays, setExpandedDays] = useState<Set<number>>(new Set());
   const [showCashFlow, setShowCashFlow] = useState(false);
 
-  const [form, setForm] = useState({
-    name: "",
-    from_account_id: 0,
-    to_account_id: 0,
-    amount: 0,
-    day_of_month: 1,
-    description: "",
-  });
+  const [form, setForm] = useState(emptyTransferForm);
+
+  const openNewDialog = () => {
+    setEditingTransfer(null);
+    setForm(emptyTransferForm);
+    setIsDialogOpen(true);
+  };
+
+  const openEditDialog = (transfer: ScheduledTransfer) => {
+    setEditingTransfer(transfer);
+    setForm({
+      name: transfer.name,
+      from_account_id: transfer.from_account_id,
+      to_account_id: transfer.to_account_id,
+      amount: transfer.amount,
+      day_of_month: transfer.day_of_month,
+      description: transfer.description || "",
+      category: transfer.category || "technical",
+    });
+    setIsDialogOpen(true);
+  };
+
+  const handleCloseDialog = () => {
+    setIsDialogOpen(false);
+    setEditingTransfer(null);
+    setForm(emptyTransferForm);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await createTransfer.mutateAsync(form);
-      setForm({
-        name: "",
-        from_account_id: 0,
-        to_account_id: 0,
-        amount: 0,
-        day_of_month: 1,
-        description: "",
-      });
+      if (editingTransfer) {
+        await updateTransfer.mutateAsync({ id: editingTransfer.id, input: form });
+      } else {
+        await createTransfer.mutateAsync(form);
+      }
+      setForm(emptyTransferForm);
+      setEditingTransfer(null);
       setIsDialogOpen(false);
     } catch (error) {
-      console.error("Failed to create transfer:", error);
-      alert("Chyba při vytváření převodu: " + (error as Error).message);
+      console.error("Failed to save transfer:", error);
+      alert("Chyba při ukládání převodu: " + (error as Error).message);
     }
   };
 
@@ -110,7 +149,7 @@ export function MoneyFlow() {
           <h1 className="text-2xl font-bold">Workflow převodů</h1>
           <p className="text-muted-foreground">Naplánujte měsíční tok peněz mezi účty</p>
         </div>
-        <Button onClick={() => setIsDialogOpen(true)} disabled={accounts.length < 2}>
+        <Button onClick={openNewDialog} disabled={accounts.length < 2}>
           <Plus className="mr-2 h-4 w-4" />
           Přidat převod
         </Button>
@@ -268,6 +307,9 @@ export function MoneyFlow() {
                             )}
                           </div>
                           <div className="flex items-center gap-4 text-sm">
+                            <span className="text-muted-foreground">
+                              Počátek: <strong>{formatCurrency(flow.initialBalance)}</strong>
+                            </span>
                             <span className="text-green-600 flex items-center gap-1">
                               <TrendingUp className="h-4 w-4" />
                               +{formatCurrency(flow.totalInflow)}
@@ -276,8 +318,8 @@ export function MoneyFlow() {
                               <TrendingDown className="h-4 w-4" />
                               -{formatCurrency(flow.totalOutflow)}
                             </span>
-                            <span className={`font-bold ${flow.netFlow >= 0 ? "text-green-600" : "text-red-600"}`}>
-                              = {formatCurrency(flow.netFlow)}
+                            <span className={`font-bold ${flow.endOfMonthBalance >= 0 ? "text-blue-600" : "text-red-600"}`}>
+                              Konec: {formatCurrency(flow.endOfMonthBalance)}
                             </span>
                           </div>
                         </div>
@@ -294,8 +336,21 @@ export function MoneyFlow() {
                               </tr>
                             </thead>
                             <tbody>
+                              {/* Initial balance row */}
+                              <tr className="border-b bg-blue-50">
+                                <td className="py-2 px-2 font-mono">0.</td>
+                                <td className="py-2 px-2">
+                                  🏦 Počáteční zůstatek
+                                </td>
+                                <td className="py-2 px-2 text-right font-mono text-muted-foreground">
+                                  —
+                                </td>
+                                <td className="py-2 px-2 text-right font-mono font-bold text-blue-600">
+                                  {formatCurrency(flow.initialBalance)}
+                                </td>
+                              </tr>
                               {(() => {
-                                let balance = 0;
+                                let balance = flow.initialBalance;
                                 return flow.events.map((event, idx) => {
                                   balance += event.amount;
                                   const isNegative = balance < 0;
@@ -306,6 +361,7 @@ export function MoneyFlow() {
                                         {event.type === "income" && "💰 "}
                                         {event.type === "transfer_in" && "⬇️ "}
                                         {event.type === "transfer_out" && "⬆️ "}
+                                        {event.type === "expense" && "🏠 "}
                                         {event.description}
                                       </td>
                                       <td className={`py-2 px-2 text-right font-mono ${event.amount >= 0 ? "text-green-600" : "text-red-600"}`}>
@@ -319,6 +375,19 @@ export function MoneyFlow() {
                                   );
                                 });
                               })()}
+                              {/* End of month summary */}
+                              <tr className="bg-slate-100 font-semibold">
+                                <td className="py-2 px-2 font-mono">31.</td>
+                                <td className="py-2 px-2">
+                                  📊 Konec měsíce (před dalším příjmem)
+                                </td>
+                                <td className="py-2 px-2 text-right font-mono">
+                                  —
+                                </td>
+                                <td className={`py-2 px-2 text-right font-mono font-bold ${flow.endOfMonthBalance >= 0 ? "text-blue-600" : "text-red-600"}`}>
+                                  {formatCurrency(flow.endOfMonthBalance)}
+                                </td>
+                              </tr>
                             </tbody>
                           </table>
                         </div>
@@ -418,6 +487,12 @@ export function MoneyFlow() {
                                     {formatCurrency(transfer.amount)}
                                   </span>
                                   <ArrowRight className="h-5 w-5 text-blue-500" />
+                                  {transfer.category && (
+                                    <Badge variant="outline" className="text-xs mt-1">
+                                      {TRANSFER_CATEGORIES.find(c => c.value === transfer.category)?.icon}{" "}
+                                      {TRANSFER_CATEGORIES.find(c => c.value === transfer.category)?.label}
+                                    </Badge>
+                                  )}
                                 </div>
 
                                 {/* To Account */}
@@ -439,14 +514,23 @@ export function MoneyFlow() {
                                 </div>
 
                                 {/* Actions */}
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="text-red-500 hover:text-red-600 ml-2"
-                                  onClick={() => deleteTransfer.mutate(transfer.id)}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
+                                <div className="flex items-center gap-1 ml-2">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => openEditDialog(transfer)}
+                                  >
+                                    <Pencil className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-red-500 hover:text-red-600"
+                                    onClick={() => deleteTransfer.mutate(transfer.id)}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
                               </div>
                             );
                           })}
@@ -465,7 +549,7 @@ export function MoneyFlow() {
                 <p className="text-muted-foreground mt-2 text-center max-w-md">
                   Přidejte naplánované převody mezi účty. Uvidíte kdy a kolik peněz kam posíláte.
                 </p>
-                <Button onClick={() => setIsDialogOpen(true)} className="mt-4">
+                <Button onClick={openNewDialog} className="mt-4">
                   <Plus className="mr-2 h-4 w-4" />
                   Přidat první převod
                 </Button>
@@ -475,11 +559,11 @@ export function MoneyFlow() {
         </>
       )}
 
-      {/* Add Transfer Dialog */}
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+      {/* Add/Edit Transfer Dialog */}
+      <Dialog open={isDialogOpen} onOpenChange={handleCloseDialog}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Nový naplánovaný převod</DialogTitle>
+            <DialogTitle>{editingTransfer ? "Upravit převod" : "Nový naplánovaný převod"}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
@@ -575,6 +659,31 @@ export function MoneyFlow() {
             </div>
 
             <div className="space-y-2">
+              <Label>Kategorie převodu</Label>
+              <Select
+                value={form.category}
+                onValueChange={(value) => setForm({ ...form, category: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {TRANSFER_CATEGORIES.map((cat) => (
+                    <SelectItem key={cat.value} value={cat.value}>
+                      <div className="flex items-center gap-2">
+                        <span>{cat.icon}</span>
+                        <span>{cat.label}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                {TRANSFER_CATEGORIES.find(c => c.value === form.category)?.description}
+              </p>
+            </div>
+
+            <div className="space-y-2">
               <Label htmlFor="description">Poznámka (volitelné)</Label>
               <Input
                 id="description"
@@ -585,16 +694,20 @@ export function MoneyFlow() {
             </div>
 
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
+              <Button type="button" variant="outline" onClick={handleCloseDialog}>
                 Zrušit
               </Button>
               <Button
                 type="submit"
                 disabled={
-                  !form.from_account_id || !form.to_account_id || form.amount <= 0 || createTransfer.isPending
+                  !form.from_account_id || !form.to_account_id || form.amount <= 0 || createTransfer.isPending || updateTransfer.isPending
                 }
               >
-                {createTransfer.isPending ? "Ukládám..." : "Přidat převod"}
+                {createTransfer.isPending || updateTransfer.isPending
+                  ? "Ukládám..."
+                  : editingTransfer
+                  ? "Uložit změny"
+                  : "Přidat převod"}
               </Button>
             </DialogFooter>
           </form>
