@@ -22,6 +22,18 @@ export function useCreateMember() {
   });
 }
 
+export function useUpdateMember() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, input }: { id: number; input: Parameters<typeof householdApi.updateMember>[1] }) =>
+      householdApi.updateMember(id, input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["household-members"] });
+    },
+  });
+}
+
 export function useDeleteMember() {
   const queryClient = useQueryClient();
 
@@ -51,6 +63,20 @@ export function useCreateIncome() {
     mutationFn: householdApi.createIncome,
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ["member-incomes", variables.member_id] });
+      queryClient.invalidateQueries({ queryKey: ["household-members"] });
+      queryClient.invalidateQueries({ queryKey: ["member-incomes"] });
+    },
+  });
+}
+
+export function useUpdateIncome() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, input }: { id: number; input: Parameters<typeof householdApi.updateIncome>[1] }) =>
+      householdApi.updateIncome(id, input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["member-incomes"] });
       queryClient.invalidateQueries({ queryKey: ["household-members"] });
     },
   });

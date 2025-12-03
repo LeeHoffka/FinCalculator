@@ -571,7 +571,7 @@ export function Expenses() {
                   id="amount"
                   type="number"
                   min="0"
-                  step="100"
+                  step="0.01"
                   value={form.amount || ""}
                   onChange={(e) => setForm({ ...form, amount: parseFloat(e.target.value) || 0 })}
                   placeholder="15000"

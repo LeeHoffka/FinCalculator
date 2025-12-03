@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Trash2, Banknote, Calendar, Building2, Loader2 } from "lucide-react";
+import { Plus, Trash2, Banknote, Calendar, Building2, Loader2, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -22,8 +22,10 @@ import { Badge } from "@/components/ui/badge";
 import {
   useMembers,
   useCreateMember,
+  useUpdateMember,
   useDeleteMember,
   useCreateIncome,
+  useUpdateIncome,
   useDeleteIncome,
 } from "@/hooks/useHousehold";
 import { useBanksWithAccounts } from "@/hooks/useBanksAccounts";
@@ -58,8 +60,10 @@ const toMonthlyAmount = (amount: number, frequency: string): number => {
 export function Members() {
   const { data: members, isLoading } = useMembers();
   const createMember = useCreateMember();
+  const updateMember = useUpdateMember();
   const deleteMember = useDeleteMember();
   const createIncome = useCreateIncome();
+  const updateIncome = useUpdateIncome();
   const deleteIncome = useDeleteIncome();
   const { accounts, banks } = useBanksWithAccounts();
 
@@ -69,8 +73,10 @@ export function Members() {
   const [isMemberDialogOpen, setIsMemberDialogOpen] = useState(false);
   const [isIncomeDialogOpen, setIsIncomeDialogOpen] = useState(false);
   const [selectedMemberId, setSelectedMemberId] = useState<number | null>(null);
+  const [editingMember, setEditingMember] = useState<{ id: number; name: string; color: string; avatar?: string } | null>(null);
+  const [editingIncome, setEditingIncome] = useState<MemberIncome | null>(null);
 
-  const [memberForm, setMemberForm] = useState({ name: "", color: "#3B82F6" });
+  const [memberForm, setMemberForm] = useState({ name: "", color: "#3B82F6", avatar: "" });
   const [incomeForm, setIncomeForm] = useState({
     name: "",
     amount: 0,
@@ -105,20 +111,64 @@ export function Members() {
     0
   );
 
+  const openMemberDialog = (member?: { id: number; name: string; color: string; avatar?: string }) => {
+    if (member) {
+      setEditingMember(member);
+      setMemberForm({ name: member.name, color: member.color, avatar: member.avatar || "" });
+    } else {
+      setEditingMember(null);
+      setMemberForm({ name: "", color: "#3B82F6", avatar: "" });
+    }
+    setIsMemberDialogOpen(true);
+  };
+
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
-    await createMember.mutateAsync(memberForm);
-    setMemberForm({ name: "", color: "#3B82F6" });
+    if (editingMember) {
+      await updateMember.mutateAsync({ id: editingMember.id, input: memberForm });
+    } else {
+      await createMember.mutateAsync(memberForm);
+    }
+    setMemberForm({ name: "", color: "#3B82F6", avatar: "" });
+    setEditingMember(null);
     setIsMemberDialogOpen(false);
+  };
+
+  const openIncomeDialog = (memberId: number, income?: MemberIncome) => {
+    setSelectedMemberId(memberId);
+    if (income) {
+      setEditingIncome(income);
+      setIncomeForm({
+        name: income.name,
+        amount: income.amount,
+        frequency: income.frequency,
+        day_of_month: income.day_of_month,
+        account_id: income.account_id,
+      });
+    } else {
+      setEditingIncome(null);
+      setIncomeForm({
+        name: "",
+        amount: 0,
+        frequency: "monthly",
+        day_of_month: undefined,
+        account_id: undefined,
+      });
+    }
+    setIsIncomeDialogOpen(true);
   };
 
   const handleAddIncome = async (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedMemberId) {
-      await createIncome.mutateAsync({
-        member_id: selectedMemberId,
-        ...incomeForm,
-      });
+      if (editingIncome) {
+        await updateIncome.mutateAsync({ id: editingIncome.id, input: incomeForm });
+      } else {
+        await createIncome.mutateAsync({
+          member_id: selectedMemberId,
+          ...incomeForm,
+        });
+      }
       // Refresh incomes
       const incomes = await householdApi.getIncomes(selectedMemberId);
       setMemberIncomes((prev) => ({ ...prev, [selectedMemberId]: incomes }));
@@ -130,6 +180,7 @@ export function Members() {
         day_of_month: undefined,
         account_id: undefined,
       });
+      setEditingIncome(null);
       setIsIncomeDialogOpen(false);
     }
   };
@@ -139,11 +190,6 @@ export function Members() {
     // Refresh incomes
     const incomes = await householdApi.getIncomes(memberId);
     setMemberIncomes((prev) => ({ ...prev, [memberId]: incomes }));
-  };
-
-  const openIncomeDialog = (memberId: number) => {
-    setSelectedMemberId(memberId);
-    setIsIncomeDialogOpen(true);
   };
 
   const getBankById = (bankId: number) => banks.find((b) => b.id === bankId);
@@ -167,7 +213,7 @@ export function Members() {
             Přidejte členy a jejich příjmy pro výpočet rozpočtu
           </p>
         </div>
-        <Button onClick={() => setIsMemberDialogOpen(true)}>
+        <Button onClick={() => openMemberDialog()}>
           <Plus className="mr-2 h-4 w-4" />
           Přidat člena
         </Button>
@@ -219,14 +265,23 @@ export function Members() {
                       </p>
                     </div>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                    onClick={() => deleteMember.mutate(member.id)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <div className="flex gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => openMemberDialog({ id: member.id, name: member.name, color: member.color, avatar: member.avatar })}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                      onClick={() => deleteMember.mutate(member.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {/* Income percentage bar */}
@@ -252,7 +307,7 @@ export function Members() {
                       <h4 className="text-sm font-medium text-muted-foreground">Příjmy</h4>
                       <Button variant="ghost" size="sm" onClick={() => openIncomeDialog(member.id)}>
                         <Plus className="h-4 w-4 mr-1" />
-                        Přidat
+                        Přidat příjem
                       </Button>
                     </div>
 
@@ -307,6 +362,14 @@ export function Members() {
                                 <Button
                                   variant="ghost"
                                   size="sm"
+                                  className="h-8 w-8 p-0"
+                                  onClick={() => openIncomeDialog(member.id, income)}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
                                   className="h-8 w-8 p-0 text-red-500 hover:text-red-600"
                                   onClick={() => handleDeleteIncome(member.id, income.id)}
                                 >
@@ -337,7 +400,7 @@ export function Members() {
               Přidejte sebe, partnera nebo další členy domácnosti a zadejte jejich příjmy pro
               výpočet rodinného rozpočtu.
             </p>
-            <Button onClick={() => setIsMemberDialogOpen(true)} className="mt-4">
+            <Button onClick={() => openMemberDialog()} className="mt-4">
               <Plus className="mr-2 h-4 w-4" />
               Přidat prvního člena
             </Button>
@@ -345,11 +408,17 @@ export function Members() {
         </Card>
       )}
 
-      {/* Add Member Dialog */}
-      <Dialog open={isMemberDialogOpen} onOpenChange={setIsMemberDialogOpen}>
+      {/* Add/Edit Member Dialog */}
+      <Dialog open={isMemberDialogOpen} onOpenChange={(open) => {
+        setIsMemberDialogOpen(open);
+        if (!open) {
+          setEditingMember(null);
+          setMemberForm({ name: "", color: "#3B82F6", avatar: "" });
+        }
+      }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Nový člen domácnosti</DialogTitle>
+            <DialogTitle>{editingMember ? "Upravit člena" : "Nový člen domácnosti"}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleAddMember} className="space-y-4">
             <div className="space-y-2">
@@ -394,23 +463,43 @@ export function Members() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setIsMemberDialogOpen(false)}
+                onClick={() => {
+                  setIsMemberDialogOpen(false);
+                  setEditingMember(null);
+                  setMemberForm({ name: "", color: "#3B82F6", avatar: "" });
+                }}
               >
                 Zrušit
               </Button>
-              <Button type="submit" disabled={createMember.isPending}>
-                {createMember.isPending ? "Ukládám..." : "Přidat"}
+              <Button type="submit" disabled={createMember.isPending || updateMember.isPending}>
+                {createMember.isPending || updateMember.isPending
+                  ? "Ukládám..."
+                  : editingMember
+                  ? "Uložit změny"
+                  : "Přidat"}
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
 
-      {/* Add Income Dialog */}
-      <Dialog open={isIncomeDialogOpen} onOpenChange={setIsIncomeDialogOpen}>
+      {/* Add/Edit Income Dialog */}
+      <Dialog open={isIncomeDialogOpen} onOpenChange={(open) => {
+        setIsIncomeDialogOpen(open);
+        if (!open) {
+          setEditingIncome(null);
+          setIncomeForm({
+            name: "",
+            amount: 0,
+            frequency: "monthly",
+            day_of_month: undefined,
+            account_id: undefined,
+          });
+        }
+      }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Přidat příjem</DialogTitle>
+            <DialogTitle>{editingIncome ? "Upravit příjem" : "Přidat příjem"}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleAddIncome} className="space-y-4">
             <div className="space-y-2">
@@ -512,16 +601,30 @@ export function Members() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setIsIncomeDialogOpen(false)}
+                onClick={() => {
+                  setIsIncomeDialogOpen(false);
+                  setEditingIncome(null);
+                  setIncomeForm({
+                    name: "",
+                    amount: 0,
+                    frequency: "monthly",
+                    day_of_month: undefined,
+                    account_id: undefined,
+                  });
+                }}
               >
                 Zrušit
               </Button>
               <Button
                 type="submit"
                 className="bg-emerald-600 hover:bg-emerald-700"
-                disabled={createIncome.isPending}
+                disabled={createIncome.isPending || updateIncome.isPending}
               >
-                {createIncome.isPending ? "Ukládám..." : "Přidat příjem"}
+                {createIncome.isPending || updateIncome.isPending
+                  ? "Ukládám..."
+                  : editingIncome
+                  ? "Uložit změny"
+                  : "Přidat příjem"}
               </Button>
             </DialogFooter>
           </form>

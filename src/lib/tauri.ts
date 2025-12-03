@@ -252,6 +252,8 @@ export const householdApi = {
   getMembers: () => invoke<HouseholdMember[]>("get_household_members"),
   createMember: (input: { name: string; color?: string; avatar?: string }) =>
     invoke<HouseholdMember>("create_household_member", { input }),
+  updateMember: (id: number, input: { name: string; color?: string; avatar?: string }) =>
+    invoke<HouseholdMember>("update_household_member", { id, input }),
   deleteMember: (id: number) => invoke<void>("delete_household_member", { id }),
 
   getIncomes: (memberId: number) => invoke<MemberIncome[]>("get_member_incomes", { memberId }),
@@ -263,6 +265,13 @@ export const householdApi = {
     day_of_month?: number;
     account_id?: number;
   }) => invoke<MemberIncome>("create_member_income", { input }),
+  updateIncome: (id: number, input: {
+    name: string;
+    amount: number;
+    frequency?: string;
+    day_of_month?: number;
+    account_id?: number;
+  }) => invoke<MemberIncome>("update_member_income", { id, input }),
   deleteIncome: (id: number) => invoke<void>("delete_member_income", { id }),
 };
 

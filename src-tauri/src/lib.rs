@@ -94,11 +94,13 @@ pub fn run() {
             // Household Members
             commands::get_household_members,
             commands::create_household_member,
+            commands::update_household_member,
             commands::delete_household_member,
             // Member Incomes
             commands::get_member_incomes,
             commands::get_all_incomes,
             commands::create_member_income,
+            commands::update_member_income,
             commands::delete_member_income,
             // Scheduled Transfers
             commands::get_scheduled_transfers,

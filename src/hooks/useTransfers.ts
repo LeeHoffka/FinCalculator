@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { transfersApi, incomesApi, accountsApi, expensesApi, type ScheduledTransfer, type MemberIncome, type Account, type FixedExpense } from "@/lib/tauri";
+import { transfersApi, incomesApi, accountsApi, expensesApi, goalsApi, type ScheduledTransfer, type MemberIncome, type Account, type FixedExpense } from "@/lib/tauri";
+import { calculateWeeklyRecommendation, calculateYearlyGoalRecommendation } from "./useGoals";
 
 export function useScheduledTransfers() {
   return useQuery({
@@ -121,13 +122,17 @@ export function useCashFlowAnalysis() {
     queryKey: ["accounts"],
     queryFn: () => accountsApi.getAccounts(true),
   });
+  const { data: goals, isLoading: goalsLoading } = useQuery({
+    queryKey: ["financial-goals"],
+    queryFn: goalsApi.getGoals,
+  });
 
-  const isLoading = transfersLoading || incomesLoading || expensesLoading || accountsLoading;
+  const isLoading = transfersLoading || incomesLoading || expensesLoading || accountsLoading || goalsLoading;
 
   // Build cash flow for each account
   const accountCashFlows: Map<number, AccountCashFlow> = new Map();
 
-  if (!isLoading && accounts && transfers && incomes && expenses) {
+  if (!isLoading && accounts && transfers && incomes && expenses && goals) {
     // Initialize accounts with their current balance
     for (const acc of accounts) {
       accountCashFlows.set(acc.id, {
@@ -180,6 +185,53 @@ export function useCashFlowAnalysis() {
           description: `${expense.name} (${expense.category})`,
           amount: -monthlyAmount,
           accountId: expense.account_id!,
+        });
+        flow.totalOutflow += monthlyAmount;
+      }
+    }
+
+    // Add financial goals (variable weekly, funds, yearly goals)
+    const currentYear = new Date().getFullYear();
+    const currentMonth = new Date().getMonth() + 1;
+    
+    for (const goal of goals.filter(g => g.is_active && g.account_id)) {
+      const flow = accountCashFlows.get(goal.account_id!);
+      if (!flow) continue;
+
+      let monthlyAmount = 0;
+      let description = "";
+      let day = 1; // Default day
+
+      if (goal.goal_type === "weekly_variable" && goal.weekly_amount && goal.day_of_week !== undefined) {
+        // Calculate monthly amount for weekly variable expense
+        const { total } = calculateWeeklyRecommendation(goal.weekly_amount, goal.day_of_week, currentYear, currentMonth);
+        monthlyAmount = total;
+        description = `${goal.name} (variabilní týdenní)`;
+        day = 1; // Could be improved to show first occurrence
+      } else if (goal.goal_type === "budget_fund" && goal.monthly_contribution) {
+        // Monthly contribution to fund
+        monthlyAmount = goal.monthly_contribution;
+        description = `${goal.name} (fond)`;
+        day = 1; // First of month
+      } else if (goal.goal_type === "yearly_goal" && goal.yearly_amount && goal.target_month) {
+        // Calculate monthly contribution for yearly goal
+        const rec = calculateYearlyGoalRecommendation(
+          goal.yearly_amount,
+          goal.target_month,
+          goal.current_saved || 0
+        );
+        monthlyAmount = rec.monthlyAmount;
+        description = `${goal.name} (roční cíl)`;
+        day = 1; // First of month
+      }
+
+      if (monthlyAmount > 0) {
+        flow.events.push({
+          day,
+          type: "expense",
+          description,
+          amount: -monthlyAmount,
+          accountId: goal.account_id!,
         });
         flow.totalOutflow += monthlyAmount;
       }

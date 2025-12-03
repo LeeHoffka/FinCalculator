@@ -52,6 +52,35 @@ pub fn create_household_member(input: CreateMemberInput) -> Result<HouseholdMemb
 }
 
 #[tauri::command]
+pub fn update_household_member(id: i64, input: CreateMemberInput) -> Result<HouseholdMember> {
+    let conn = get_connection()?;
+    let color = input.color.unwrap_or_else(|| "#3B82F6".to_string());
+    
+    conn.execute(
+        "UPDATE household_members SET name = ?1, color = ?2, avatar = ?3, updated_at = CURRENT_TIMESTAMP WHERE id = ?4",
+        (&input.name, &color, &input.avatar, id),
+    )?;
+    
+    // Return updated member
+    let member = conn.query_row(
+        "SELECT id, name, color, avatar, created_at, updated_at FROM household_members WHERE id = ?1",
+        [id],
+        |row| {
+            Ok(HouseholdMember {
+                id: Some(row.get(0)?),
+                name: row.get(1)?,
+                color: row.get(2)?,
+                avatar: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
+        },
+    )?;
+    
+    Ok(member)
+}
+
+#[tauri::command]
 pub fn delete_household_member(id: i64) -> Result<()> {
     let conn = get_connection()?;
     conn.execute("DELETE FROM household_members WHERE id = ?1", [id])?;
@@ -152,6 +181,46 @@ pub fn create_member_income(input: CreateIncomeInput) -> Result<MemberIncome> {
         created_at: None,
         updated_at: None,
     })
+}
+
+#[tauri::command]
+pub fn update_member_income(id: i64, input: CreateIncomeInput) -> Result<MemberIncome> {
+    let conn = get_connection()?;
+    let frequency = input.frequency.unwrap_or_else(|| "monthly".to_string());
+    
+    conn.execute(
+        "UPDATE member_incomes SET name = ?1, amount = ?2, frequency = ?3, day_of_month = ?4, account_id = ?5, updated_at = CURRENT_TIMESTAMP WHERE id = ?6",
+        (
+            &input.name,
+            input.amount,
+            &frequency,
+            input.day_of_month,
+            input.account_id,
+            id,
+        ),
+    )?;
+    
+    // Return updated income
+    let income = conn.query_row(
+        "SELECT id, member_id, name, amount, frequency, day_of_month, account_id, is_active, created_at, updated_at FROM member_incomes WHERE id = ?1",
+        [id],
+        |row| {
+            Ok(MemberIncome {
+                id: Some(row.get(0)?),
+                member_id: row.get(1)?,
+                name: row.get(2)?,
+                amount: row.get(3)?,
+                frequency: row.get(4)?,
+                day_of_month: row.get(5)?,
+                account_id: row.get(6)?,
+                is_active: row.get::<_, i32>(7)? == 1,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
+            })
+        },
+    )?;
+    
+    Ok(income)
 }
 
 #[tauri::command]

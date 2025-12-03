@@ -10,14 +10,21 @@ import {
   Building2,
   GitBranch,
   Loader2,
+  AlertTriangle,
+  Calculator,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useMembers } from "@/hooks/useHousehold";
 import { useBanksWithAccounts } from "@/hooks/useBanksAccounts";
-import { useTransfersTimeline, useScheduledTransfers } from "@/hooks/useTransfers";
+import { useTransfersTimeline, useScheduledTransfers, useCashFlowAnalysis, type AccountCashFlow } from "@/hooks/useTransfers";
 import { useBudgetSummary } from "@/hooks/useBudget";
+import { useFinancialGoals } from "@/hooks/useGoals";
 import { householdApi, type MemberIncome } from "@/lib/tauri";
 import { formatCurrency } from "@/utils/currency";
 import { TRANSFER_CATEGORIES } from "@/pages/MoneyFlow";
@@ -41,6 +48,28 @@ export function Dashboard() {
   const { timeline } = useTransfersTimeline();
   const { data: allTransfers } = useScheduledTransfers();
   const { totalFixedExpenses, totalBudgets, isLoading: budgetLoading } = useBudgetSummary();
+  const { accountCashFlows, isLoading: cashFlowLoading } = useCashFlowAnalysis();
+  const { goals, isLoading: goalsLoading } = useFinancialGoals();
+  
+  // Calculate reserved amounts per account (from goals/funds)
+  const reservedByAccount = (goals || []).reduce((acc, goal) => {
+    if (!goal.account_id || !goal.is_active) return acc;
+    
+    let reserved = 0;
+    if (goal.goal_type === "yearly_goal" && goal.current_saved) {
+      // For yearly goals, use current_saved (already saved amount)
+      reserved += goal.current_saved;
+    } else if (goal.goal_type === "budget_fund" && goal.current_balance) {
+      // For funds, use current_balance (money in the fund)
+      reserved += goal.current_balance;
+    }
+    // weekly_variable doesn't reserve money - it's just a planned expense
+    
+    if (reserved > 0) {
+      acc[goal.account_id] = (acc[goal.account_id] || 0) + reserved;
+    }
+    return acc;
+  }, {} as Record<number, number>);
 
   // Calculate transfers by category
   const transfersByCategory = (allTransfers || []).reduce((acc, transfer) => {
@@ -56,6 +85,12 @@ export function Dashboard() {
   // Store incomes per member
   const [memberIncomes, setMemberIncomes] = useState<Record<number, MemberIncome[]>>({});
   const [incomesLoading, setIncomesLoading] = useState(true);
+
+  // Quick calculator state
+  const [calculatorOpen, setCalculatorOpen] = useState(false);
+  const [calculatorAmount, setCalculatorAmount] = useState<number>(0);
+  const [calculatorAccountId, setCalculatorAccountId] = useState<number | undefined>(undefined);
+  const [calculatorDay, setCalculatorDay] = useState<number>(1);
 
   // Fetch incomes for all members
   useEffect(() => {
@@ -83,6 +118,94 @@ export function Dashboard() {
 
   const getBankById = (bankId: number | undefined) => banks.find((b) => b.id === bankId);
   const getAccountById = (accountId: number) => accounts.find((a) => a.id === accountId);
+
+  // Calculate cash flow with bonus income
+  // For calculator: start from bonus amount (not current balance) and subtract planned payments
+  const calculateWithBonusIncome = (
+    bonusAmount: number,
+    accountId: number,
+    day: number
+  ): Map<number, AccountCashFlow> => {
+    const result = new Map<number, AccountCashFlow>();
+    
+    // Clone existing cash flows
+    for (const [accId, flow] of accountCashFlows) {
+      result.set(accId, {
+        ...flow,
+        events: [...flow.events],
+        runningBalances: [],
+      });
+    }
+
+    // For the target account, replace initial balance with bonus
+    // This shows what remains after planned payments from the bonus
+    const targetFlow = result.get(accountId);
+    if (targetFlow) {
+      // For calculator: start from bonus amount instead of current balance
+      // Remove existing income events for this account (they're already in the bonus)
+      // Keep expenses, transfers, and incoming transfers from other accounts
+      targetFlow.events = targetFlow.events.filter(
+        (e) => !(e.type === "income" && e.accountId === accountId)
+      );
+      
+      // Reset totals to recalculate without existing incomes
+      targetFlow.totalInflow = 0;
+      targetFlow.totalOutflow = 0;
+      
+      // Recalculate totals from filtered events
+      for (const event of targetFlow.events) {
+        if (event.amount > 0) {
+          targetFlow.totalInflow += event.amount;
+        } else {
+          targetFlow.totalOutflow += Math.abs(event.amount);
+        }
+      }
+      
+      // Set initial balance to bonus
+      targetFlow.initialBalance = bonusAmount;
+      
+      // Add a marker event for display purposes (amount 0, just for description)
+      targetFlow.events.push({
+        day,
+        type: "income",
+        description: `Jednorázový příjem (bonus/prémie): ${formatCurrency(bonusAmount)}`,
+        amount: 0, // Already included in initialBalance
+        accountId,
+      });
+    }
+
+    // Recalculate running balances for all accounts
+    for (const [, flow] of result) {
+      // Sort events by day
+      flow.events.sort((a, b) => a.day - b.day);
+      flow.netFlow = flow.totalInflow - flow.totalOutflow;
+
+      // For target account with bonus, start from bonus amount
+      // For other accounts, use their current balance
+      let balance = flow.accountId === accountId ? bonusAmount : flow.initialBalance;
+      const dayBalances: Map<number, number> = new Map();
+      
+      // Add initial balance at day 0
+      dayBalances.set(0, balance);
+
+      for (const event of flow.events) {
+        balance += event.amount;
+        dayBalances.set(event.day, balance);
+      }
+
+      // Convert to array
+      flow.runningBalances = Array.from(dayBalances.entries())
+        .sort((a, b) => a[0] - b[0])
+        .map(([day, bal]) => ({ day, balance: bal }));
+
+      // Find minimum balance during the month
+      flow.minBalance = Math.min(...flow.runningBalances.map(rb => rb.balance));
+      flow.endOfMonthBalance = balance;
+      flow.hasNegativeBalance = flow.minBalance < 0;
+    }
+
+    return result;
+  };
 
   // Calculate total income
   const totalMonthlyIncome = (members || []).reduce((sum, member) => {
@@ -139,11 +262,11 @@ export function Dashboard() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium opacity-90 flex items-center gap-2">
               <TrendingUp className="h-4 w-4" />
-              Příjmy domácnosti
+              Příjmy domácnosti (Kč)
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold">{formatCurrency(totalMonthlyIncome)}</p>
+            <p className="font-bold leading-tight" style={{ fontSize: 'clamp(1.25rem, 3.5vw, 1.875rem)' }}>{formatCurrency(totalMonthlyIncome).replace(/\s*Kč/g, '')}</p>
             <p className="text-sm opacity-80 mt-1">{(members || []).length} členů</p>
           </CardContent>
         </Card>
@@ -153,11 +276,11 @@ export function Dashboard() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium opacity-90 flex items-center gap-2">
               <Receipt className="h-4 w-4" />
-              Stálé výdaje
+              Stálé výdaje (Kč)
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold">{formatCurrency(totalFixedExpenses)}</p>
+            <p className="font-bold leading-tight" style={{ fontSize: 'clamp(1.25rem, 3.5vw, 1.875rem)' }}>{formatCurrency(totalFixedExpenses).replace(/\s*Kč/g, '')}</p>
             <p className="text-sm opacity-80 mt-1">{fixedPercentage.toFixed(0)}% příjmů</p>
           </CardContent>
         </Card>
@@ -167,11 +290,11 @@ export function Dashboard() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium opacity-90 flex items-center gap-2">
               <PiggyBank className="h-4 w-4" />
-              Rozpočty
+              Rozpočty (Kč)
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold">{formatCurrency(totalBudgets)}</p>
+            <p className="font-bold leading-tight" style={{ fontSize: 'clamp(1.25rem, 3.5vw, 1.875rem)' }}>{formatCurrency(totalBudgets).replace(/\s*Kč/g, '')}</p>
             <p className="text-sm opacity-80 mt-1">{budgetsPercentage.toFixed(0)}% příjmů</p>
           </CardContent>
         </Card>
@@ -185,17 +308,221 @@ export function Dashboard() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium opacity-90 flex items-center gap-2">
               {remaining >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
-              {remaining >= 0 ? "Zbývá" : "Přečerpáno"}
+              {remaining >= 0 ? "Zbývá (Kč)" : "Přečerpáno (Kč)"}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold">{formatCurrency(Math.abs(remaining))}</p>
+            <p className="font-bold leading-tight" style={{ fontSize: 'clamp(1.25rem, 3.5vw, 1.875rem)' }}>{formatCurrency(Math.abs(remaining)).replace(/\s*Kč/g, '')}</p>
             <p className="text-sm opacity-80 mt-1">
               {remaining >= 0 ? `${remainingPercentage.toFixed(0)}% rezerva` : "Deficit!"}
             </p>
           </CardContent>
         </Card>
       </div>
+
+      {/* Quick Calculator */}
+      <Card className="border-dashed border-blue-300 bg-blue-50">
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Calculator className="h-5 w-5 text-blue-600" />
+              <div>
+                <h3 className="font-semibold text-blue-900">Rychlý výpočet</h3>
+                <p className="text-sm text-blue-700">Zadejte jednorázový příjem (prémie, bonus) a uvidíte výsledné zůstatky</p>
+              </div>
+            </div>
+            <Dialog 
+              open={calculatorOpen} 
+              onOpenChange={(open) => {
+                setCalculatorOpen(open);
+                if (!open) {
+                  // Reset when closing
+                  setCalculatorAmount(0);
+                  setCalculatorAccountId(undefined);
+                  setCalculatorDay(1);
+                }
+              }}
+            >
+              <DialogTrigger asChild>
+                <Button variant="default" className="bg-blue-600 hover:bg-blue-700">
+                  <Calculator className="mr-2 h-4 w-4" />
+                  Otevřít kalkulačku
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>Rychlý výpočet s jednorázovým příjmem</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="calc-amount">Částka (Kč)</Label>
+                      <Input
+                        id="calc-amount"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={calculatorAmount || ""}
+                        onChange={(e) => setCalculatorAmount(parseFloat(e.target.value) || 0)}
+                        placeholder="130000"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="calc-account">Účet (kam přijde)</Label>
+                      <Select
+                        value={calculatorAccountId?.toString() || ""}
+                        onValueChange={(value) => setCalculatorAccountId(parseInt(value))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Vyberte účet" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {accounts.map((acc) => {
+                            const bank = getBankById(acc.bank_id);
+                            return (
+                              <SelectItem key={acc.id} value={acc.id.toString()}>
+                                [{bank?.short_name || bank?.name?.slice(0, 2)}] {acc.name}
+                              </SelectItem>
+                            );
+                          })}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="calc-day">Den v měsíci</Label>
+                      <Input
+                        id="calc-day"
+                        type="number"
+                        min="1"
+                        max="31"
+                        value={calculatorDay}
+                        onChange={(e) => setCalculatorDay(parseInt(e.target.value) || 1)}
+                      />
+                    </div>
+                  </div>
+
+                  {calculatorAmount > 0 && calculatorAccountId && (
+                    <div className="mt-6 space-y-4">
+                      <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm text-blue-700 font-medium">Jednorázový příjem:</p>
+                            <p className="text-2xl font-bold text-blue-900">{formatCurrency(calculatorAmount)}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm text-blue-700 font-medium">Celkem volných prostředků:</p>
+                            <p className="text-2xl font-bold text-blue-900">
+                              {formatCurrency(
+                                (() => {
+                                  const calculatedFlows = calculateWithBonusIncome(
+                                    calculatorAmount,
+                                    calculatorAccountId,
+                                    calculatorDay
+                                  );
+                                  return Array.from(calculatedFlows.values())
+                                    .filter(flow => {
+                                      const acc = accounts.find(a => a.id === flow.accountId);
+                                      return acc && acc.account_type !== "credit_card";
+                                    })
+                                    .reduce((sum, flow) => sum + Math.max(0, flow.endOfMonthBalance), 0);
+                                })()
+                              )}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="border-t pt-4">
+                        <h3 className="font-semibold mb-4">Výsledné zůstatky po přidání příjmu:</h3>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          {(() => {
+                            const calculatedFlows = calculateWithBonusIncome(
+                              calculatorAmount,
+                              calculatorAccountId,
+                              calculatorDay
+                            );
+                            
+                            return accounts.map((account) => {
+                              const flow = calculatedFlows.get(account.id);
+                              if (!flow) return null;
+                              
+                              const bank = getBankById(account.bank_id);
+                              const isCreditCard = account.account_type === "credit_card";
+                              const creditLimit = account.credit_limit || 0;
+                              const expectedBalance = flow.endOfMonthBalance;
+                              const originalFlow = accountCashFlows.get(account.id);
+                              const originalBalance = originalFlow?.endOfMonthBalance ?? (account.current_balance || 0);
+                              const difference = expectedBalance - originalBalance;
+                              
+                              return (
+                                <div
+                                  key={account.id}
+                                  className="p-3 rounded-lg border bg-white"
+                                  style={{ borderLeftWidth: 4, borderLeftColor: bank?.color || "#ccc" }}
+                                >
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-2">
+                                      <Badge 
+                                        variant="outline" 
+                                        className="text-xs"
+                                        style={{ borderColor: bank?.color, color: bank?.color }}
+                                      >
+                                        {bank?.short_name || bank?.name?.slice(0, 3)}
+                                      </Badge>
+                                      <span className="font-medium text-sm">{account.name}</span>
+                                    </div>
+                                  </div>
+                                  
+                                  <div className="space-y-1">
+                                    {isCreditCard ? (
+                                      <>
+                                        <div className="text-right">
+                                          <p className={`text-lg font-bold ${expectedBalance >= 0 ? "text-green-600" : "text-red-600"}`}>
+                                            {formatCurrency(expectedBalance)}
+                                          </p>
+                                          <p className="text-xs text-muted-foreground">
+                                            Dostupný kredit | Dluh: {formatCurrency(Math.max(0, creditLimit - expectedBalance))}
+                                          </p>
+                                        </div>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <div className="text-right">
+                                          <p className={`text-lg font-bold ${expectedBalance >= 0 ? "text-slate-900" : "text-red-600"}`}>
+                                            {formatCurrency(expectedBalance)}
+                                          </p>
+                                          <p className="text-xs text-muted-foreground">Očekávaný zůstatek</p>
+                                        </div>
+                                      </>
+                                    )}
+                                    
+                                    {difference !== 0 && (
+                                      <div className="flex items-center justify-end gap-1 mt-1">
+                                        {difference > 0 ? (
+                                          <TrendingUp className="h-3 w-3 text-green-600" />
+                                        ) : (
+                                          <TrendingDown className="h-3 w-3 text-red-600" />
+                                        )}
+                                        <span className={`text-xs font-medium ${difference > 0 ? "text-green-600" : "text-red-600"}`}>
+                                          {difference > 0 ? "+" : ""}{formatCurrency(difference)}
+                                        </span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            });
+                          })()}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Budget Flow Visualization */}
       {totalMonthlyIncome > 0 && (
@@ -353,14 +680,14 @@ export function Dashboard() {
           </CardHeader>
           <CardContent>
             {timeline.length > 0 ? (
-              <div className="space-y-2">
-                {timeline.slice(0, 4).map(({ day, transfers: dayTransfers }) => (
-                  <div key={day} className="flex items-center gap-3 p-2 bg-slate-50 rounded-lg">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-blue-700 font-bold text-sm">
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {timeline.map(({ day, transfers: dayTransfers }) => (
+                  <div key={day} className="flex items-start gap-3 p-2 bg-slate-50 rounded-lg">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-blue-700 font-bold text-sm flex-shrink-0">
                       {day}.
                     </div>
-                    <div className="flex-1">
-                      {dayTransfers.slice(0, 2).map((t) => {
+                    <div className="flex-1 space-y-1">
+                      {dayTransfers.map((t) => {
                         const from = getAccountById(t.from_account_id);
                         const to = getAccountById(t.to_account_id);
                         const fromBank = from ? getBankById(from.bank_id) : undefined;
@@ -387,19 +714,9 @@ export function Dashboard() {
                           </div>
                         );
                       })}
-                      {dayTransfers.length > 2 && (
-                        <span className="text-xs text-muted-foreground">
-                          +{dayTransfers.length - 2} dalších
-                        </span>
-                      )}
                     </div>
                   </div>
                 ))}
-                {timeline.length > 4 && (
-                  <p className="text-sm text-muted-foreground text-center">
-                    +{timeline.length - 4} dalších dnů
-                  </p>
-                )}
               </div>
             ) : (
               <div className="text-center py-6">
@@ -441,10 +758,29 @@ export function Dashboard() {
                 const balance = account.current_balance || 0;
                 const creditLimit = account.credit_limit || 0;
                 
+                // Find owner
+                const owner = account.owner_user_id 
+                  ? (members || []).find(m => m.id === account.owner_user_id)
+                  : null;
+                
+                // Get cash flow analysis
+                const cashFlow = accountCashFlows.get(account.id);
+                const expectedBalance = cashFlow?.endOfMonthBalance ?? balance;
+                const hasWarning = cashFlow?.hasNegativeBalance || (expectedBalance < 0 && !isCreditCard);
+                const netChange = expectedBalance - balance;
+                
+                // Get goals linked to this account
+                const accountGoals = (goals || []).filter(g => 
+                  g.account_id === account.id && 
+                  g.is_active && 
+                  ((g.goal_type === "yearly_goal" && g.current_saved) || 
+                   (g.goal_type === "budget_fund" && g.current_balance))
+                );
+                
                 return (
                   <div
                     key={account.id}
-                    className="p-3 rounded-lg border"
+                    className={`p-3 rounded-lg border ${hasWarning ? "border-red-300 bg-red-50" : ""}`}
                     style={{ borderLeftWidth: 4, borderLeftColor: bank?.color || "#ccc" }}
                   >
                     <div className="flex items-center justify-between mb-1">
@@ -457,42 +793,224 @@ export function Dashboard() {
                           {bank?.short_name || bank?.name?.slice(0, 3)}
                         </Badge>
                         <span className="font-medium text-sm">{account.name}</span>
+                        {owner && (
+                          <Badge variant="outline" className="text-xs" style={{ borderColor: owner.color, color: owner.color }}>
+                            {owner.name}
+                          </Badge>
+                        )}
                       </div>
                       {account.is_premium && (
                         <Badge variant="secondary" className="text-xs">⭐</Badge>
                       )}
                     </div>
-                    <div className="text-right">
+                    
+                    <div className="space-y-1">
                       {isCreditCard ? (
                         <>
-                          <p className={`text-lg font-bold ${balance >= 0 ? "text-green-600" : "text-red-600"}`}>
-                            {formatCurrency(balance)}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            Limit: {formatCurrency(creditLimit)} | Dluh: {formatCurrency(Math.max(0, creditLimit - balance))}
-                          </p>
+                          {/* Credit Card - show EXPECTED available balance as main number */}
+                          {!cashFlowLoading && cashFlow ? (
+                            <>
+                              {/* Expected Available Balance (MAIN) */}
+                              <div className="text-right">
+                                <p className={`text-2xl font-bold ${expectedBalance >= 0 ? "text-green-600" : "text-red-600"}`}>
+                                  {formatCurrency(expectedBalance)}
+                                </p>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  Očekávaný dostupný kredit po všech transakcích
+                                </p>
+                              </div>
+                              
+                              {/* Current Balance (smaller) */}
+                              <div className="pt-2 border-t border-slate-200 space-y-1">
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="text-muted-foreground">Aktuální dostupný kredit:</span>
+                                  <span className="font-medium">{formatCurrency(balance)}</span>
+                                </div>
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="text-muted-foreground">Limit karty:</span>
+                                  <span className="font-medium">{formatCurrency(creditLimit)}</span>
+                                </div>
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="text-muted-foreground">Aktuální dluh:</span>
+                                  <span className="font-medium text-red-600">{formatCurrency(Math.max(0, creditLimit - balance))}</span>
+                                </div>
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="text-muted-foreground">Očekávaný dluh:</span>
+                                  <span className={`font-medium ${creditLimit - expectedBalance > 0 ? "text-red-600" : "text-green-600"}`}>
+                                    {formatCurrency(Math.max(0, creditLimit - expectedBalance))}
+                                  </span>
+                                </div>
+                                
+                                {netChange !== 0 && (
+                                  <div className="flex items-center justify-end gap-1 mt-1">
+                                    {netChange > 0 ? (
+                                      <TrendingUp className="h-3 w-3 text-green-600" />
+                                    ) : (
+                                      <TrendingDown className="h-3 w-3 text-red-600" />
+                                    )}
+                                    <span className={`text-xs font-medium ${netChange > 0 ? "text-green-600" : "text-red-600"}`}>
+                                      {netChange > 0 ? "+" : ""}{formatCurrency(netChange)}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            </>
+                          ) : (
+                            /* Fallback if cash flow not loaded */
+                            <div className="text-right">
+                              <p className={`text-lg font-bold ${balance >= 0 ? "text-green-600" : "text-red-600"}`}>
+                                {formatCurrency(balance)}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                Limit: {formatCurrency(creditLimit)} | Dluh: {formatCurrency(Math.max(0, creditLimit - balance))}
+                              </p>
+                            </div>
+                          )}
                         </>
                       ) : (
-                        <p className={`text-lg font-bold ${balance >= 0 ? "text-slate-900" : "text-red-600"}`}>
-                          {formatCurrency(balance)}
-                        </p>
+                        <>
+                          {/* Regular Account - show EXPECTED balance as main number */}
+                          {!cashFlowLoading && cashFlow ? (
+                            <>
+                              {/* Expected Balance (MAIN) */}
+                              <div className="text-right">
+                                <p className={`text-2xl font-bold ${expectedBalance >= 0 ? "text-slate-900" : "text-red-600"}`}>
+                                  {formatCurrency(expectedBalance)}
+                                </p>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  Očekávaný zůstatek po všech transakcích
+                                </p>
+                              </div>
+                              
+                              {/* Current Balance (smaller) */}
+                              <div className="pt-2 border-t border-slate-200 space-y-1">
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="text-muted-foreground">Aktuální zůstatek:</span>
+                                  <span className="font-medium">{formatCurrency(balance)}</span>
+                                </div>
+                                
+                                {/* Reserved for goals */}
+                                {reservedByAccount[account.id] > 0 && (
+                                  <div className="space-y-1">
+                                    <div className="flex items-center justify-between text-xs">
+                                      <span className="text-muted-foreground">Rezervováno pro cíle:</span>
+                                      <span className="font-medium text-amber-600">{formatCurrency(reservedByAccount[account.id])}</span>
+                                    </div>
+                                    {accountGoals.length > 0 && (
+                                      <div className="pl-2 space-y-0.5">
+                                        {accountGoals.map(goal => (
+                                          <div key={goal.id} className="text-xs text-muted-foreground flex items-center justify-between">
+                                            <span>• {goal.name}</span>
+                                            <span className="text-amber-600">
+                                              {formatCurrency(
+                                                (goal.goal_type === "yearly_goal" ? goal.current_saved : goal.current_balance) || 0
+                                              )}
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                                
+                                {/* Available balance */}
+                                {reservedByAccount[account.id] > 0 && (
+                                  <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200">
+                                    <span className="text-muted-foreground font-semibold">Volný zůstatek:</span>
+                                    <span className={`font-bold ${expectedBalance - reservedByAccount[account.id] >= 0 ? "text-green-600" : "text-red-600"}`}>
+                                      {formatCurrency(expectedBalance - reservedByAccount[account.id])}
+                                    </span>
+                                  </div>
+                                )}
+                                
+                                {netChange !== 0 && (
+                                  <div className="flex items-center justify-end gap-1 mt-1">
+                                    {netChange > 0 ? (
+                                      <TrendingUp className="h-3 w-3 text-green-600" />
+                                    ) : (
+                                      <TrendingDown className="h-3 w-3 text-red-600" />
+                                    )}
+                                    <span className={`text-xs font-medium ${netChange > 0 ? "text-green-600" : "text-red-600"}`}>
+                                      {netChange > 0 ? "+" : ""}{formatCurrency(netChange)}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            </>
+                          ) : (
+                            /* Fallback if cash flow not loaded */
+                            <div className="text-right">
+                              <p className={`text-lg font-bold ${balance >= 0 ? "text-slate-900" : "text-red-600"}`}>
+                                {formatCurrency(balance)}
+                              </p>
+                              <p className="text-xs text-muted-foreground">Aktuální zůstatek</p>
+                            </div>
+                          )}
+                        </>
+                      )}
+                      
+                      {/* Warning */}
+                      {hasWarning && (
+                        <div className="flex items-center gap-1 text-xs text-red-600 bg-red-100 p-1 rounded mt-1">
+                          <AlertTriangle className="h-3 w-3" />
+                          <span>Nedostatečný zůstatek!</span>
+                        </div>
+                      )}
+                      
+                      {/* Debug info - show what's being calculated */}
+                      {!cashFlowLoading && cashFlow && (
+                        <details className="mt-2 text-xs text-muted-foreground border-t border-slate-200 pt-2">
+                          <summary className="cursor-pointer hover:text-slate-700">🔍 Zobrazit detaily výpočtu</summary>
+                          <div className="mt-2 pl-2 space-y-1 bg-slate-50 p-2 rounded">
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>Příjmy:</div>
+                              <div className="text-right font-medium text-green-600">+{formatCurrency(cashFlow.totalInflow)}</div>
+                              <div>Výdaje:</div>
+                              <div className="text-right font-medium text-red-600">-{formatCurrency(cashFlow.totalOutflow)}</div>
+                              <div>Čistý tok:</div>
+                              <div className={`text-right font-medium ${cashFlow.netFlow >= 0 ? "text-green-600" : "text-red-600"}`}>
+                                {formatCurrency(cashFlow.netFlow)}
+                              </div>
+                              <div>Počáteční zůstatek:</div>
+                              <div className="text-right">{formatCurrency(cashFlow.initialBalance)}</div>
+                              {isCreditCard && (
+                                <>
+                                  <div>Limit karty:</div>
+                                  <div className="text-right">{formatCurrency(creditLimit)}</div>
+                                  <div>Očekávaný dostupný kredit:</div>
+                                  <div className={`text-right font-medium ${expectedBalance >= 0 ? "text-green-600" : "text-red-600"}`}>
+                                    {formatCurrency(expectedBalance)}
+                                  </div>
+                                  <div>Očekávaný dluh:</div>
+                                  <div className={`text-right font-medium ${creditLimit - expectedBalance > 0 ? "text-red-600" : "text-green-600"}`}>
+                                    {formatCurrency(Math.max(0, creditLimit - expectedBalance))}
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                            {cashFlow.events.length > 0 && (
+                              <div className="mt-2 pt-2 border-t border-slate-200">
+                                <div className="font-semibold mb-1">Plánované transakce ({cashFlow.events.length}):</div>
+                                <div className="max-h-32 overflow-y-auto space-y-1">
+                                  {cashFlow.events.map((e, i) => (
+                                    <div key={i} className="pl-2 text-xs">
+                                      <span className="font-mono">Den {e.day}:</span>{" "}
+                                      <span className={e.amount >= 0 ? "text-green-600" : "text-red-600"}>
+                                        {e.amount >= 0 ? "+" : ""}{formatCurrency(e.amount)}
+                                      </span>{" "}
+                                      <span className="text-muted-foreground">({e.description})</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </details>
                       )}
                     </div>
                   </div>
                 );
               })}
-            </div>
-            <div className="mt-4 pt-3 border-t flex justify-between items-center">
-              <span className="text-sm text-muted-foreground">Celkem na účtech:</span>
-              <span className="text-xl font-bold">
-                {formatCurrency(accounts.reduce((sum, acc) => {
-                  // For credit cards, count available balance as positive only if > 0
-                  if (acc.account_type === "credit_card") {
-                    return sum; // Don't add credit card available balance to total
-                  }
-                  return sum + (acc.current_balance || 0);
-                }, 0))}
-              </span>
             </div>
           </CardContent>
         </Card>
