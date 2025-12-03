@@ -31,6 +31,7 @@ CREATE INDEX IF NOT EXISTS idx_users_active ON users(active);
 CREATE TABLE IF NOT EXISTS banks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
+    short_name TEXT,
     logo TEXT,
     color TEXT NOT NULL DEFAULT '#10B981',
     notes TEXT,
@@ -56,6 +57,8 @@ CREATE TABLE IF NOT EXISTS accounts (
     current_balance REAL NOT NULL DEFAULT 0.0,
     color TEXT,
     icon TEXT,
+    is_premium INTEGER DEFAULT 0,
+    premium_min_flow REAL,
     active INTEGER DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -255,6 +258,100 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
     ('date_format', 'DD.MM.YYYY'),
     ('language', 'cs'),
     ('theme', 'light');
+
+-- ============================================
+-- HOUSEHOLD_MEMBERS (Členové domácnosti - pro plánování)
+-- ============================================
+CREATE TABLE IF NOT EXISTS household_members (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    color TEXT NOT NULL DEFAULT '#3B82F6',
+    avatar TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ============================================
+-- MEMBER_INCOMES (Příjmy členů)
+-- ============================================
+CREATE TABLE IF NOT EXISTS member_incomes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    member_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    amount REAL NOT NULL,
+    frequency TEXT NOT NULL DEFAULT 'monthly',
+    day_of_month INTEGER,
+    account_id INTEGER,
+    is_active INTEGER DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (member_id) REFERENCES household_members(id) ON DELETE CASCADE,
+    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_incomes_member ON member_incomes(member_id);
+CREATE INDEX IF NOT EXISTS idx_incomes_account ON member_incomes(account_id);
+
+-- ============================================
+-- SCHEDULED_TRANSFERS (Naplánované převody mezi účty)
+-- ============================================
+CREATE TABLE IF NOT EXISTS scheduled_transfers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    from_account_id INTEGER NOT NULL,
+    to_account_id INTEGER NOT NULL,
+    amount REAL NOT NULL,
+    day_of_month INTEGER NOT NULL,
+    description TEXT,
+    category TEXT DEFAULT 'internal',
+    display_order INTEGER DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (from_account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+    FOREIGN KEY (to_account_id) REFERENCES accounts(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_from ON scheduled_transfers(from_account_id);
+CREATE INDEX IF NOT EXISTS idx_scheduled_to ON scheduled_transfers(to_account_id);
+CREATE INDEX IF NOT EXISTS idx_scheduled_day ON scheduled_transfers(day_of_month);
+
+-- ============================================
+-- FIXED_EXPENSES (Stálé výdaje)
+-- ============================================
+CREATE TABLE IF NOT EXISTS fixed_expenses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    amount REAL NOT NULL,
+    category TEXT NOT NULL DEFAULT 'other',
+    frequency TEXT NOT NULL DEFAULT 'monthly',
+    day_of_month INTEGER,
+    assigned_to TEXT DEFAULT 'shared',
+    is_active INTEGER DEFAULT 1,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_fixed_category ON fixed_expenses(category);
+CREATE INDEX IF NOT EXISTS idx_fixed_active ON fixed_expenses(is_active);
+
+-- ============================================
+-- BUDGET_CATEGORIES (Rozpočtové kategorie)
+-- ============================================
+CREATE TABLE IF NOT EXISTS budget_categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    budget_type TEXT NOT NULL DEFAULT 'other',
+    monthly_limit REAL NOT NULL,
+    color TEXT NOT NULL DEFAULT '#6B7280',
+    icon TEXT,
+    assigned_to TEXT DEFAULT 'shared',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_budget_type ON budget_categories(budget_type);
 
 -- ============================================
 -- VÝCHOZÍ DATA

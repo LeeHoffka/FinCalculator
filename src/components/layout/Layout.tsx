@@ -3,15 +3,12 @@ import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
 
 const pageTitles: Record<string, string> = {
-  "/": "Dashboard",
-  "/accounts": "Účty",
-  "/transactions": "Transakce",
-  "/banks": "Banky",
-  "/categories": "Kategorie",
-  "/recurring": "Opakované platby",
-  "/flows": "Peněžní toky",
-  "/goals": "Spořicí cíle",
-  "/reports": "Reporty",
+  "/": "Přehled rozpočtu",
+  "/members": "Členové & Příjmy",
+  "/banks": "Banky & Účty",
+  "/flow": "Workflow převodů",
+  "/expenses": "Stálé výdaje",
+  "/budgets": "Rozpočty",
   "/settings": "Nastavení",
 };
 
@@ -31,4 +28,3 @@ export function Layout() {
     </div>
   );
 }
-

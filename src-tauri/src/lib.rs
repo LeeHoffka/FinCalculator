@@ -83,10 +83,33 @@ pub fn run() {
             commands::export_database,
             commands::import_database,
             commands::export_transactions_csv,
+            commands::export_full_backup,
+            commands::save_backup_to_file,
+            commands::import_from_backup_file,
             // Reports
             commands::get_monthly_summary,
             commands::get_category_breakdown,
             commands::get_cash_flow_data,
+            // Household Members
+            commands::get_household_members,
+            commands::create_household_member,
+            commands::delete_household_member,
+            // Member Incomes
+            commands::get_member_incomes,
+            commands::create_member_income,
+            commands::delete_member_income,
+            // Scheduled Transfers
+            commands::get_scheduled_transfers,
+            commands::create_scheduled_transfer,
+            commands::delete_scheduled_transfer,
+            // Fixed Expenses
+            commands::get_fixed_expenses,
+            commands::create_fixed_expense,
+            commands::delete_fixed_expense,
+            // Budget Categories
+            commands::get_budget_categories,
+            commands::create_budget_category,
+            commands::delete_budget_category,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

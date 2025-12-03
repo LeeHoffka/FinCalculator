@@ -8,6 +8,7 @@ pub mod flows;
 pub mod goals;
 pub mod backup;
 pub mod reports;
+pub mod household;
 
 pub use users::*;
 pub use banks::*;
@@ -19,4 +20,5 @@ pub use flows::*;
 pub use goals::*;
 pub use backup::*;
 pub use reports::*;
+pub use household::*;
 

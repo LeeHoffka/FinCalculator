@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 pub struct Bank {
     pub id: i64,
     pub name: String,
+    pub short_name: Option<String>,
     pub logo: Option<String>,
     pub color: String,
     pub notes: Option<String>,
@@ -15,6 +16,7 @@ pub struct Bank {
 #[derive(Debug, Deserialize)]
 pub struct CreateBankInput {
     pub name: String,
+    pub short_name: Option<String>,
     pub logo: Option<String>,
     pub color: Option<String>,
     pub notes: Option<String>,
@@ -23,6 +25,7 @@ pub struct CreateBankInput {
 #[derive(Debug, Deserialize)]
 pub struct UpdateBankInput {
     pub name: String,
+    pub short_name: Option<String>,
     pub logo: Option<String>,
     pub color: String,
     pub notes: Option<String>,

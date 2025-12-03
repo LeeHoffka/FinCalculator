@@ -13,6 +13,8 @@ pub struct Account {
     pub current_balance: f64,
     pub color: Option<String>,
     pub icon: Option<String>,
+    pub is_premium: bool,
+    pub premium_min_flow: Option<f64>,
     pub active: bool,
     pub created_at: String,
     pub updated_at: String,
@@ -25,10 +27,12 @@ pub struct CreateAccountInput {
     pub bank_id: Option<i64>,
     pub owner_user_id: Option<i64>,
     pub account_number: Option<String>,
-    pub currency: String,
-    pub initial_balance: f64,
+    pub currency: Option<String>,
+    pub initial_balance: Option<f64>,
     pub color: Option<String>,
     pub icon: Option<String>,
+    pub is_premium: Option<bool>,
+    pub premium_min_flow: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -41,6 +45,8 @@ pub struct UpdateAccountInput {
     pub currency: String,
     pub color: Option<String>,
     pub icon: Option<String>,
+    pub is_premium: Option<bool>,
+    pub premium_min_flow: Option<f64>,
     pub active: bool,
 }
 

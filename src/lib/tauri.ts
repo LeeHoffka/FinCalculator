@@ -1,356 +1,419 @@
-import type {
-  User,
-  CreateUserInput,
-  UpdateUserInput,
-  Bank,
-  CreateBankInput,
-  UpdateBankInput,
-  Account,
-  CreateAccountInput,
-  UpdateAccountInput,
-  Category,
-  CreateCategoryInput,
-  UpdateCategoryInput,
-  Tag,
-  CreateTagInput,
-  Transaction,
-  CreateTransactionInput,
-  UpdateTransactionInput,
-  TransactionFilters,
-  RecurringPayment,
-  CreateRecurringPaymentInput,
-  UpdateRecurringPaymentInput,
-  FlowGroup,
-  CreateFlowGroupInput,
-  UpdateFlowGroupInput,
-  SavingsGoal,
-  CreateSavingsGoalInput,
-  UpdateSavingsGoalInput,
-  MonthlySummary,
-  CategoryBreakdown,
-  CashFlowData,
-} from "@/types";
+import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 
-// Check if running in Tauri
-const isTauri = typeof window !== "undefined" && "__TAURI__" in window;
+// Check if we're running in Tauri (v2)
+const isTauri = () => {
+  return typeof window !== "undefined" && 
+    (window as any).__TAURI_INTERNALS__ !== undefined;
+};
 
-// Dynamic import of Tauri API
-let invokeFunction: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+// In-memory mock storage for browser development
+const mockStorage = {
+  members: [] as HouseholdMember[],
+  incomes: [] as MemberIncome[],
+  banks: [] as Bank[],
+  accounts: [] as BankAccount[],
+  transfers: [] as ScheduledTransfer[],
+  expenses: [] as FixedExpense[],
+  budgets: [] as BudgetCategory[],
+  nextId: 1,
+};
 
-if (isTauri) {
-  // Running in Tauri - use real invoke
-  import("@tauri-apps/api/core").then((module) => {
-    invokeFunction = module.invoke;
-  });
-} else {
-  // Running in browser - use mock
-  console.warn("Tauri API not available - using mock data for development");
-}
-
-// Mock invoke for browser development
-async function mockInvoke<T>(cmd: string, _args?: Record<string, unknown>): Promise<T> {
-  // Simulate network delay
-  await new Promise((resolve) => setTimeout(resolve, 100));
-
-  // Return mock data based on command
-  const mockData: Record<string, unknown> = {
-    get_users: [
-      {
-        id: 1,
-        name: "Společné",
-        color: "#9333EA",
-        avatar: null,
-        role: "member",
-        is_shared_user: true,
-        active: true,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      },
-    ] as User[],
-    get_banks: [
-      {
-        id: 1,
-        name: "Česká spořitelna",
-        logo: null,
-        color: "#0066b3",
-        notes: "Hlavní banka",
-        active: true,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      },
-      {
-        id: 2,
-        name: "Raiffeisenbank",
-        logo: null,
-        color: "#ffcc00",
-        notes: null,
-        active: true,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      },
-    ] as Bank[],
-    get_accounts: [
-      {
-        id: 1,
-        name: "Běžný účet",
-        account_type: "checking",
-        bank_id: 1,
-        owner_user_id: null,
-        account_number: "123456789/0800",
-        currency: "CZK",
-        initial_balance: 50000,
-        current_balance: 45230.5,
-        color: "#3B82F6",
-        icon: "💳",
-        active: true,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      },
-      {
-        id: 2,
-        name: "Spořicí účet",
-        account_type: "savings",
-        bank_id: 1,
-        owner_user_id: null,
-        account_number: "987654321/0800",
-        currency: "CZK",
-        initial_balance: 100000,
-        current_balance: 125000,
-        color: "#10B981",
-        icon: "🏦",
-        active: true,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      },
-      {
-        id: 3,
-        name: "Hotovost",
-        account_type: "cash",
-        bank_id: null,
-        owner_user_id: null,
-        account_number: null,
-        currency: "CZK",
-        initial_balance: 5000,
-        current_balance: 3500,
-        color: "#F59E0B",
-        icon: "💵",
-        active: true,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      },
-    ] as Account[],
-    get_categories: [
-      { id: 1, name: "Příjem", icon: "💰", color: "#10B981", category_type: "income", is_system: true, parent_category_id: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-      { id: 2, name: "Výdaj", icon: "💸", color: "#EF4444", category_type: "expense", is_system: true, parent_category_id: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-      { id: 3, name: "Převod", icon: "🔄", color: "#3B82F6", category_type: "both", is_system: true, parent_category_id: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-      { id: 4, name: "Potraviny", icon: "🛒", color: "#F97316", category_type: "expense", is_system: false, parent_category_id: 2, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-      { id: 5, name: "Doprava", icon: "🚗", color: "#8B5CF6", category_type: "expense", is_system: false, parent_category_id: 2, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-      { id: 6, name: "Zábava", icon: "🎬", color: "#EC4899", category_type: "expense", is_system: false, parent_category_id: 2, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-      { id: 7, name: "Plat", icon: "💼", color: "#10B981", category_type: "income", is_system: false, parent_category_id: 1, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-    ] as Category[],
-    get_category_tree: [
-      { 
-        id: 1, name: "Příjem", icon: "💰", color: "#10B981", category_type: "income", is_system: true, parent_category_id: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-        children: [
-          { id: 7, name: "Plat", icon: "💼", color: "#10B981", category_type: "income", is_system: false, parent_category_id: 1, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), children: [] },
-        ]
-      },
-      { 
-        id: 2, name: "Výdaj", icon: "💸", color: "#EF4444", category_type: "expense", is_system: true, parent_category_id: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-        children: [
-          { id: 4, name: "Potraviny", icon: "🛒", color: "#F97316", category_type: "expense", is_system: false, parent_category_id: 2, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), children: [] },
-          { id: 5, name: "Doprava", icon: "🚗", color: "#8B5CF6", category_type: "expense", is_system: false, parent_category_id: 2, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), children: [] },
-          { id: 6, name: "Zábava", icon: "🎬", color: "#EC4899", category_type: "expense", is_system: false, parent_category_id: 2, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), children: [] },
-        ]
-      },
-      { id: 3, name: "Převod", icon: "🔄", color: "#3B82F6", category_type: "both", is_system: true, parent_category_id: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), children: [] },
-    ] as Category[],
-    get_transactions: [
-      { id: 1, date: "2024-12-01", amount: 35000, currency: "CZK", transaction_type: "income", from_account_id: null, to_account_id: 1, category_id: 7, description: "Výplata", owner_user_id: null, is_shared: false, status: "completed", recurring_payment_id: null, flow_group_id: null, notes: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-      { id: 2, date: "2024-12-02", amount: 1250, currency: "CZK", transaction_type: "expense", from_account_id: 1, to_account_id: null, category_id: 4, description: "Nákup v Albertu", owner_user_id: null, is_shared: false, status: "completed", recurring_payment_id: null, flow_group_id: null, notes: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-      { id: 3, date: "2024-12-02", amount: 450, currency: "CZK", transaction_type: "expense", from_account_id: 1, to_account_id: null, category_id: 5, description: "Benzín", owner_user_id: null, is_shared: false, status: "completed", recurring_payment_id: null, flow_group_id: null, notes: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-      { id: 4, date: "2024-12-03", amount: 350, currency: "CZK", transaction_type: "expense", from_account_id: 3, to_account_id: null, category_id: 6, description: "Kino", owner_user_id: null, is_shared: false, status: "completed", recurring_payment_id: null, flow_group_id: null, notes: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-      { id: 5, date: "2024-12-03", amount: 5000, currency: "CZK", transaction_type: "transfer", from_account_id: 1, to_account_id: 2, category_id: 3, description: "Převod na spoření", owner_user_id: null, is_shared: false, status: "completed", recurring_payment_id: null, flow_group_id: null, notes: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-    ] as Transaction[],
-    get_tags: [] as Tag[],
-    get_recurring_payments: [] as RecurringPayment[],
-    get_flow_groups: [] as FlowGroup[],
-    get_savings_goals: [] as SavingsGoal[],
-    get_monthly_summary: {
-      month: "2024-12",
-      total_income: 35000,
-      total_expense: 7050,
-      net_change: 27950,
-      by_category: [
-        { category_id: 4, category_name: "Potraviny", category_color: "#F97316", amount: 1250, percentage: 17.7, transaction_count: 1 },
-        { category_id: 5, category_name: "Doprava", category_color: "#8B5CF6", amount: 450, percentage: 6.4, transaction_count: 1 },
-        { category_id: 6, category_name: "Zábava", category_color: "#EC4899", amount: 350, percentage: 5.0, transaction_count: 1 },
-        { category_id: 3, category_name: "Převod", category_color: "#3B82F6", amount: 5000, percentage: 70.9, transaction_count: 1 },
-      ],
-    } as MonthlySummary,
-    get_category_breakdown: [
-      { category_id: 4, category_name: "Potraviny", category_color: "#F97316", amount: 1250, percentage: 17.7, transaction_count: 1 },
-      { category_id: 5, category_name: "Doprava", category_color: "#8B5CF6", amount: 450, percentage: 6.4, transaction_count: 1 },
-      { category_id: 6, category_name: "Zábava", category_color: "#EC4899", amount: 350, percentage: 5.0, transaction_count: 1 },
-    ] as CategoryBreakdown[],
-    get_cash_flow_data: [
-      { date: "2024-12-01", income: 35000, expense: 0, balance: 35000 },
-      { date: "2024-12-02", income: 0, expense: 1700, balance: 33300 },
-      { date: "2024-12-03", income: 0, expense: 350, balance: 32950 },
-    ] as CashFlowData[],
-  };
-
-  return (mockData[cmd] ?? null) as T;
-}
-
-// Invoke wrapper that uses either real Tauri or mock
-async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  if (isTauri && invokeFunction) {
-    return invokeFunction(cmd, args);
+// Generic invoke wrapper with mock fallback
+export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  if (isTauri()) {
+    return tauriInvoke<T>(cmd, args);
   }
-  return mockInvoke<T>(cmd, args);
+  
+  // Mock implementations for browser development
+  console.log(`[Mock] ${cmd}`, args);
+  return handleMockCommand<T>(cmd, args);
+}
+
+function handleMockCommand<T>(cmd: string, args?: Record<string, unknown>): T {
+  const id = mockStorage.nextId++;
+  
+  switch (cmd) {
+    // Household Members
+    case "get_household_members":
+      return mockStorage.members as T;
+    case "create_household_member": {
+      const input = args?.input as { name: string; color?: string };
+      const member: HouseholdMember = {
+        id,
+        name: input.name,
+        color: input.color || "#3B82F6",
+      };
+      mockStorage.members.push(member);
+      return member as T;
+    }
+    case "delete_household_member": {
+      const memberId = args?.id as number;
+      mockStorage.members = mockStorage.members.filter((m) => m.id !== memberId);
+      mockStorage.incomes = mockStorage.incomes.filter((i) => i.member_id !== memberId);
+      return undefined as T;
+    }
+
+    // Member Incomes
+    case "get_member_incomes": {
+      const memberId = args?.memberId as number;
+      return mockStorage.incomes.filter((i) => i.member_id === memberId) as T;
+    }
+    case "create_member_income": {
+      const input = args?.input as Omit<MemberIncome, "id">;
+      const income: MemberIncome = { id, ...input, is_active: true };
+      mockStorage.incomes.push(income);
+      return income as T;
+    }
+    case "delete_member_income": {
+      const incomeId = args?.id as number;
+      mockStorage.incomes = mockStorage.incomes.filter((i) => i.id !== incomeId);
+      return undefined as T;
+    }
+
+    // Banks
+    case "get_banks":
+      return mockStorage.banks as T;
+    case "create_bank": {
+      const input = args?.input as { name: string; short_name?: string; color?: string };
+      const bank: Bank = {
+        id,
+        name: input.name,
+        short_name: input.short_name,
+        color: input.color || "#10B981",
+        active: true,
+      };
+      mockStorage.banks.push(bank);
+      return bank as T;
+    }
+    case "delete_bank": {
+      const bankId = args?.id as number;
+      mockStorage.banks = mockStorage.banks.filter((b) => b.id !== bankId);
+      mockStorage.accounts = mockStorage.accounts.filter((a) => a.bank_id !== bankId);
+      return undefined as T;
+    }
+
+    // Accounts
+    case "get_accounts":
+      return mockStorage.accounts as T;
+    case "create_account": {
+      const input = args?.input as Partial<BankAccount>;
+      const account: BankAccount = {
+        id,
+        name: input.name || "",
+        account_type: input.account_type || "checking",
+        bank_id: input.bank_id,
+        owner_user_id: input.owner_user_id,
+        account_number: input.account_number,
+        currency: input.currency || "CZK",
+        initial_balance: input.initial_balance || 0,
+        current_balance: input.current_balance || 0,
+        is_premium: input.is_premium || false,
+        premium_min_flow: input.premium_min_flow,
+        active: true,
+      };
+      mockStorage.accounts.push(account);
+      return account as T;
+    }
+    case "delete_account": {
+      const accountId = args?.id as number;
+      mockStorage.accounts = mockStorage.accounts.filter((a) => a.id !== accountId);
+      mockStorage.transfers = mockStorage.transfers.filter(
+        (t) => t.from_account_id !== accountId && t.to_account_id !== accountId
+      );
+      return undefined as T;
+    }
+
+    // Scheduled Transfers
+    case "get_scheduled_transfers":
+      return mockStorage.transfers as T;
+    case "create_scheduled_transfer": {
+      const input = args?.input as Omit<ScheduledTransfer, "id" | "display_order" | "is_active">;
+      const transfer: ScheduledTransfer = {
+        id,
+        ...input,
+        display_order: mockStorage.transfers.length + 1,
+        is_active: true,
+      };
+      mockStorage.transfers.push(transfer);
+      return transfer as T;
+    }
+    case "delete_scheduled_transfer": {
+      const transferId = args?.id as number;
+      mockStorage.transfers = mockStorage.transfers.filter((t) => t.id !== transferId);
+      return undefined as T;
+    }
+
+    // Fixed Expenses
+    case "get_fixed_expenses":
+      return mockStorage.expenses as T;
+    case "create_fixed_expense": {
+      const input = args?.input as Omit<FixedExpense, "id" | "is_active">;
+      const expense: FixedExpense = { id, ...input, is_active: true };
+      mockStorage.expenses.push(expense);
+      return expense as T;
+    }
+    case "delete_fixed_expense": {
+      const expenseId = args?.id as number;
+      mockStorage.expenses = mockStorage.expenses.filter((e) => e.id !== expenseId);
+      return undefined as T;
+    }
+
+    // Budget Categories
+    case "get_budget_categories":
+      return mockStorage.budgets as T;
+    case "create_budget_category": {
+      const input = args?.input as Omit<BudgetCategory, "id">;
+      const budget: BudgetCategory = { id, ...input };
+      mockStorage.budgets.push(budget);
+      return budget as T;
+    }
+    case "delete_budget_category": {
+      const budgetId = args?.id as number;
+      mockStorage.budgets = mockStorage.budgets.filter((b) => b.id !== budgetId);
+      return undefined as T;
+    }
+
+    // Backup
+    case "export_full_backup":
+      return {
+        version: "1.0.0",
+        created_at: new Date().toISOString(),
+        data: {
+          household_members: mockStorage.members.map((m) => ({
+            member: m,
+            incomes: mockStorage.incomes.filter((i) => i.member_id === m.id),
+          })),
+          banks: mockStorage.banks.map((b) => ({
+            bank: b,
+            accounts: mockStorage.accounts.filter((a) => a.bank_id === b.id),
+          })),
+          scheduled_transfers: mockStorage.transfers,
+          fixed_expenses: mockStorage.expenses,
+          budget_categories: mockStorage.budgets,
+        },
+      } as T;
+
+    default:
+      console.warn(`[Mock] Unknown command: ${cmd}`);
+      return [] as T;
+  }
 }
 
 // ============================================
-// USERS API
+// HOUSEHOLD MEMBERS
 // ============================================
-export const usersApi = {
-  create: (input: CreateUserInput) => invoke<User>("create_user", { input }),
-  getAll: (activeOnly: boolean = true) =>
-    invoke<User[]>("get_users", { activeOnly }),
-  update: (id: number, input: UpdateUserInput) =>
-    invoke<User>("update_user", { id, input }),
-  delete: (id: number) => invoke<void>("delete_user", { id }),
+export interface HouseholdMember {
+  id: number;
+  name: string;
+  color: string;
+  avatar?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface MemberIncome {
+  id: number;
+  member_id: number;
+  name: string;
+  amount: number;
+  frequency: string;
+  day_of_month?: number;
+  account_id?: number;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export const householdApi = {
+  getMembers: () => invoke<HouseholdMember[]>("get_household_members"),
+  createMember: (input: { name: string; color?: string; avatar?: string }) =>
+    invoke<HouseholdMember>("create_household_member", { input }),
+  deleteMember: (id: number) => invoke<void>("delete_household_member", { id }),
+
+  getIncomes: (memberId: number) => invoke<MemberIncome[]>("get_member_incomes", { memberId }),
+  createIncome: (input: {
+    member_id: number;
+    name: string;
+    amount: number;
+    frequency?: string;
+    day_of_month?: number;
+    account_id?: number;
+  }) => invoke<MemberIncome>("create_member_income", { input }),
+  deleteIncome: (id: number) => invoke<void>("delete_member_income", { id }),
 };
 
 // ============================================
-// BANKS API
+// BANKS & ACCOUNTS
 // ============================================
+export interface Bank {
+  id: number;
+  name: string;
+  short_name?: string;
+  logo?: string;
+  color: string;
+  notes?: string;
+  active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface BankAccount {
+  id: number;
+  name: string;
+  account_type: string;
+  bank_id?: number;
+  owner_user_id?: number;
+  account_number?: string;
+  currency: string;
+  initial_balance: number;
+  current_balance: number;
+  color?: string;
+  icon?: string;
+  is_premium: boolean;
+  premium_min_flow?: number;
+  active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export const banksApi = {
-  create: (input: CreateBankInput) => invoke<Bank>("create_bank", { input }),
-  getAll: (activeOnly: boolean = true) =>
-    invoke<Bank[]>("get_banks", { activeOnly }),
-  update: (id: number, input: UpdateBankInput) =>
-    invoke<Bank>("update_bank", { id, input }),
-  delete: (id: number) => invoke<void>("delete_bank", { id }),
+  getBanks: () => invoke<Bank[]>("get_banks", { activeOnly: true }),
+  createBank: (input: { name: string; short_name?: string; logo?: string; color?: string; notes?: string }) =>
+    invoke<Bank>("create_bank", { input }),
+  deleteBank: (id: number) => invoke<void>("delete_bank", { id }),
 };
 
-// ============================================
-// ACCOUNTS API
-// ============================================
 export const accountsApi = {
-  create: (input: CreateAccountInput) =>
-    invoke<Account>("create_account", { input }),
-  getAll: (activeOnly: boolean = true) =>
-    invoke<Account[]>("get_accounts", { activeOnly }),
-  getById: (id: number) => invoke<Account>("get_account_by_id", { id }),
-  update: (id: number, input: UpdateAccountInput) =>
-    invoke<Account>("update_account", { id, input }),
-  delete: (id: number) => invoke<void>("delete_account", { id }),
-  getBalance: (id: number) => invoke<number>("get_account_balance", { id }),
+  getAccounts: () => invoke<BankAccount[]>("get_accounts", { activeOnly: true }),
+  createAccount: (input: {
+    name: string;
+    account_type: string;
+    bank_id?: number;
+    owner_user_id?: number;
+    account_number?: string;
+    currency?: string;
+    initial_balance?: number;
+    color?: string;
+    is_premium?: boolean;
+    premium_min_flow?: number;
+  }) => invoke<BankAccount>("create_account", { input }),
+  deleteAccount: (id: number) => invoke<void>("delete_account", { id }),
 };
 
 // ============================================
-// CATEGORIES API
+// SCHEDULED TRANSFERS
 // ============================================
-export const categoriesApi = {
-  create: (input: CreateCategoryInput) =>
-    invoke<Category>("create_category", { input }),
-  getAll: () => invoke<Category[]>("get_categories"),
-  getTree: () => invoke<Category[]>("get_category_tree"),
-  update: (id: number, input: UpdateCategoryInput) =>
-    invoke<Category>("update_category", { id, input }),
-  delete: (id: number) => invoke<void>("delete_category", { id }),
+export interface ScheduledTransfer {
+  id: number;
+  name: string;
+  from_account_id: number;
+  to_account_id: number;
+  amount: number;
+  day_of_month: number;
+  description?: string;
+  category?: string;
+  display_order: number;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export const transfersApi = {
+  getTransfers: () => invoke<ScheduledTransfer[]>("get_scheduled_transfers"),
+  createTransfer: (input: {
+    name: string;
+    from_account_id: number;
+    to_account_id: number;
+    amount: number;
+    day_of_month: number;
+    description?: string;
+    category?: string;
+  }) => invoke<ScheduledTransfer>("create_scheduled_transfer", { input }),
+  deleteTransfer: (id: number) => invoke<void>("delete_scheduled_transfer", { id }),
 };
 
 // ============================================
-// TAGS API
+// FIXED EXPENSES
 // ============================================
-export const tagsApi = {
-  create: (input: CreateTagInput) => invoke<Tag>("create_tag", { input }),
-  getAll: () => invoke<Tag[]>("get_tags"),
-  addToTransaction: (transactionId: number, tagId: number) =>
-    invoke<void>("add_tag_to_transaction", { transactionId, tagId }),
-  removeFromTransaction: (transactionId: number, tagId: number) =>
-    invoke<void>("remove_tag_from_transaction", { transactionId, tagId }),
+export interface FixedExpense {
+  id: number;
+  name: string;
+  amount: number;
+  category: string;
+  frequency: string;
+  day_of_month?: number;
+  assigned_to?: string;
+  is_active: boolean;
+  notes?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export const expensesApi = {
+  getExpenses: () => invoke<FixedExpense[]>("get_fixed_expenses"),
+  createExpense: (input: {
+    name: string;
+    amount: number;
+    category: string;
+    frequency?: string;
+    day_of_month?: number;
+    assigned_to?: string;
+    notes?: string;
+  }) => invoke<FixedExpense>("create_fixed_expense", { input }),
+  deleteExpense: (id: number) => invoke<void>("delete_fixed_expense", { id }),
 };
 
 // ============================================
-// TRANSACTIONS API
+// BUDGET CATEGORIES
 // ============================================
-export const transactionsApi = {
-  create: (input: CreateTransactionInput) =>
-    invoke<Transaction>("create_transaction", { input }),
-  getAll: () => invoke<Transaction[]>("get_transactions"),
-  getById: (id: number) => invoke<Transaction>("get_transaction_by_id", { id }),
-  update: (id: number, input: UpdateTransactionInput) =>
-    invoke<Transaction>("update_transaction", { id, input }),
-  delete: (id: number) => invoke<void>("delete_transaction", { id }),
-  getFiltered: (filters: TransactionFilters) =>
-    invoke<Transaction[]>("get_transactions_filtered", { filters }),
+export interface BudgetCategory {
+  id: number;
+  name: string;
+  budget_type: string;
+  monthly_limit: number;
+  color: string;
+  icon?: string;
+  assigned_to?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export const budgetsApi = {
+  getBudgets: () => invoke<BudgetCategory[]>("get_budget_categories"),
+  createBudget: (input: {
+    name: string;
+    budget_type: string;
+    monthly_limit: number;
+    color?: string;
+    icon?: string;
+    assigned_to?: string;
+  }) => invoke<BudgetCategory>("create_budget_category", { input }),
+  deleteBudget: (id: number) => invoke<void>("delete_budget_category", { id }),
 };
 
 // ============================================
-// RECURRING PAYMENTS API
+// BACKUP
 // ============================================
-export const recurringApi = {
-  create: (input: CreateRecurringPaymentInput) =>
-    invoke<RecurringPayment>("create_recurring_payment", { input }),
-  getAll: () => invoke<RecurringPayment[]>("get_recurring_payments"),
-  update: (id: number, input: UpdateRecurringPaymentInput) =>
-    invoke<RecurringPayment>("update_recurring_payment", { id, input }),
-  delete: (id: number) => invoke<void>("delete_recurring_payment", { id }),
-  process: () => invoke<void>("process_recurring_payments"),
-};
+export interface FullBackup {
+  version: string;
+  created_at: string;
+  data: {
+    household_members: Array<{
+      member: HouseholdMember;
+      incomes: MemberIncome[];
+    }>;
+    banks: Array<{
+      bank: Bank;
+      accounts: BankAccount[];
+    }>;
+    scheduled_transfers: ScheduledTransfer[];
+    fixed_expenses: FixedExpense[];
+    budget_categories: BudgetCategory[];
+  };
+}
 
-// ============================================
-// FLOW GROUPS API
-// ============================================
-export const flowsApi = {
-  create: (input: CreateFlowGroupInput) =>
-    invoke<FlowGroup>("create_flow_group", { input }),
-  getAll: () => invoke<FlowGroup[]>("get_flow_groups"),
-  update: (id: number, input: UpdateFlowGroupInput) =>
-    invoke<FlowGroup>("update_flow_group", { id, input }),
-  delete: (id: number) => invoke<void>("delete_flow_group", { id }),
-  addTransaction: (flowId: number, transactionId: number) =>
-    invoke<void>("add_transaction_to_flow", { flowId, transactionId }),
-  removeTransaction: (flowId: number, transactionId: number) =>
-    invoke<void>("remove_transaction_from_flow", { flowId, transactionId }),
-};
-
-// ============================================
-// SAVINGS GOALS API
-// ============================================
-export const goalsApi = {
-  create: (input: CreateSavingsGoalInput) =>
-    invoke<SavingsGoal>("create_savings_goal", { input }),
-  getAll: () => invoke<SavingsGoal[]>("get_savings_goals"),
-  update: (id: number, input: UpdateSavingsGoalInput) =>
-    invoke<SavingsGoal>("update_savings_goal", { id, input }),
-  delete: (id: number) => invoke<void>("delete_savings_goal", { id }),
-};
-
-// ============================================
-// BACKUP API
-// ============================================
 export const backupApi = {
-  exportDatabase: (path: string) =>
-    invoke<void>("export_database", { path }),
-  importDatabase: (path: string) =>
-    invoke<void>("import_database", { path }),
-  exportTransactionsCsv: (path: string, filters?: TransactionFilters) =>
-    invoke<void>("export_transactions_csv", { path, filters }),
-};
-
-// ============================================
-// REPORTS API
-// ============================================
-export const reportsApi = {
-  getMonthlySummary: (year: number, month: number) =>
-    invoke<MonthlySummary>("get_monthly_summary", { year, month }),
-  getCategoryBreakdown: (startDate: string, endDate: string) =>
-    invoke<CategoryBreakdown[]>("get_category_breakdown", { startDate, endDate }),
-  getCashFlowData: (startDate: string, endDate: string) =>
-    invoke<CashFlowData[]>("get_cash_flow_data", { startDate, endDate }),
+  exportFull: () => invoke<FullBackup>("export_full_backup"),
+  saveToFile: (path: string) => invoke<void>("save_backup_to_file", { path }),
+  importFromFile: (path: string) => invoke<void>("import_from_backup_file", { path }),
 };

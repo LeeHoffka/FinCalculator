@@ -3,14 +3,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Layout } from "@/components/layout/Layout";
 import { Dashboard } from "@/pages/Dashboard";
-import { Accounts } from "@/pages/Accounts";
-import { Transactions } from "@/pages/Transactions";
-import { Banks } from "@/pages/Banks";
-import { Categories } from "@/pages/Categories";
-import { Recurring } from "@/pages/Recurring";
-import { Flows } from "@/pages/Flows";
-import { Goals } from "@/pages/Goals";
-import { Reports } from "@/pages/Reports";
+import { Members } from "@/pages/Members";
+import { BanksAccounts } from "@/pages/BanksAccounts";
+import { MoneyFlow } from "@/pages/MoneyFlow";
+import { Expenses } from "@/pages/Expenses";
+import { Budgets } from "@/pages/Budgets";
 import { Settings } from "@/pages/Settings";
 
 const queryClient = new QueryClient({
@@ -30,14 +27,11 @@ function App() {
           <Routes>
             <Route element={<Layout />}>
               <Route path="/" element={<Dashboard />} />
-              <Route path="/accounts" element={<Accounts />} />
-              <Route path="/transactions" element={<Transactions />} />
-              <Route path="/banks" element={<Banks />} />
-              <Route path="/categories" element={<Categories />} />
-              <Route path="/recurring" element={<Recurring />} />
-              <Route path="/flows" element={<Flows />} />
-              <Route path="/goals" element={<Goals />} />
-              <Route path="/reports" element={<Reports />} />
+              <Route path="/members" element={<Members />} />
+              <Route path="/banks" element={<BanksAccounts />} />
+              <Route path="/flow" element={<MoneyFlow />} />
+              <Route path="/expenses" element={<Expenses />} />
+              <Route path="/budgets" element={<Budgets />} />
               <Route path="/settings" element={<Settings />} />
             </Route>
           </Routes>
